@@ -17,6 +17,8 @@ func _base() -> Vector2:
 
 func _enter_btn() -> Vector2: return Vector2(size.x - 150, size.y - 260)
 func _drift_btn() -> Vector2: return Vector2(size.x - 260, size.y - 130)
+func _horn_btn() -> Vector2: return Vector2(size.x - 330, size.y - 290)
+var horn_id := -1
 
 func _input(ev: InputEvent) -> void:
 	if not visible: return
@@ -31,6 +33,9 @@ func _input(ev: InputEvent) -> void:
 				Input.parse_input_event(a)
 				var b := InputEventAction.new(); b.action = "enter_exit"; b.pressed = false
 				Input.parse_input_event.call_deferred(b)
+			elif ev.position.distance_to(_horn_btn()) < 50:
+				horn_id = ev.index
+				Input.action_press("horn")
 			elif ev.position.distance_to(_drift_btn()) < 75:
 				hb_id = ev.index
 				Game.touch_handbrake = true
@@ -38,6 +43,8 @@ func _input(ev: InputEvent) -> void:
 			if ev.index == stick_id:
 				stick_id = -1; stick_pos = Vector2.ZERO; Game.touch_vec = Vector2.ZERO
 				stick_origin = Vector2(170, -170)
+			if ev.index == horn_id:
+				horn_id = -1; Input.action_release("horn")
 			if ev.index == hb_id:
 				hb_id = -1; Game.touch_handbrake = false
 		queue_redraw()
@@ -52,10 +59,10 @@ func _draw() -> void:
 	draw_arc(b, RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	draw_circle(b + stick_pos, 48, Color(1, 1, 1, 0.45))
 	var font := ThemeDB.fallback_font
-	for pair in [[_enter_btn(), "ENTER", Color(0.2, 0.8, 0.3, 0.45)], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45)]]:
-		draw_circle(pair[0], 70, pair[2])
-		draw_arc(pair[0], 70, 0, TAU, 48, Color(1, 1, 1, 0.6), 3.0)
-		draw_string(font, pair[0] + Vector2(-38, 9), pair[1], HORIZONTAL_ALIGNMENT_CENTER, 76, 24, Color.WHITE)
+	for pair in [[_enter_btn(), "ENTER", Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0]]:
+		draw_circle(pair[0], pair[3], pair[2])
+		draw_arc(pair[0], pair[3], 0, TAU, 48, Color(1, 1, 1, 0.6), 3.0)
+		draw_string(font, pair[0] + Vector2(-38, 8), pair[1], HORIZONTAL_ALIGNMENT_CENTER, 76, 20 if pair[3] < 60 else 24, Color.WHITE)
 
 func _process(_dt: float) -> void:
 	if not visible: return

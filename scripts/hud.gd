@@ -6,6 +6,9 @@ var stars: Control
 var speed_l: Label
 var msg_l: Label
 var hint_l: Label
+var bars: Control
+var wasted_rect: ColorRect
+var wasted_l: Label
 var msg_t := 0.0
 var shown_cash := 0.0
 
@@ -23,8 +26,25 @@ func _ready() -> void:
 	msg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	msg_l.size = Vector2(800, 90)
 	hint_l = _label(18, Color(0.9, 0.9, 0.9))
-	hint_l.text = "WASD/arrows move  ·  E enter/exit car  ·  SPACE handbrake"
+	hint_l.text = "WASD/arrows move  ·  E enter/exit car  ·  SPACE handbrake  ·  H horn"
 	Game.message.connect(_on_msg)
+	bars = Bars.new()
+	add_child(bars)
+	wasted_rect = ColorRect.new()
+	wasted_rect.color = Color(0.55, 0.0, 0.0, 0.35)
+	wasted_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wasted_rect.visible = false
+	add_child(wasted_rect)
+	wasted_l = _label(120, Color(0.95, 0.1, 0.1))
+	wasted_l.text = "WASTED"
+	wasted_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wasted_l.size = Vector2(900, 160)
+	wasted_l.add_theme_constant_override("outline_size", 24)
+	wasted_l.visible = false
+
+func show_wasted(on: bool) -> void:
+	wasted_rect.visible = on
+	wasted_l.visible = on
 
 func _label(sz: int, col: Color) -> Label:
 	var l := Label.new()
@@ -49,6 +69,10 @@ func _process(dt: float) -> void:
 	msg_l.position = Vector2(vs.x * 0.5 - 400, vs.y * 0.5 - 170)
 	stars.position = Vector2(vs.x * 0.5, 44)
 	stars.queue_redraw()
+	bars.position = Vector2(vs.x - 236, 74)
+	bars.queue_redraw()
+	wasted_rect.size = vs
+	wasted_l.position = Vector2(vs.x * 0.5 - 450, vs.y * 0.5 - 90)
 	hint_l.position = Vector2(16, vs.y - 40)
 	var car = Game.main.player_car if Game.main else null
 	if car:
@@ -75,3 +99,15 @@ class StarBar extends Control:
 			var outline := pts.duplicate(); outline.append(pts[0])
 			draw_colored_polygon(pts, fill)
 			draw_polyline(outline, Color(0, 0, 0, 0.9) if i < n else Color(1, 1, 1, 0.25), 3.0)
+
+class Bars extends Control:
+	func _draw() -> void:
+		var m = Game.main
+		if m == null: return
+		_bar(Vector2(0, 0), m.player.health / 100.0, Color(0.95, 0.2, 0.25), "HP")
+		if m.player_car:
+			_bar(Vector2(0, 26), maxf(m.player_car.health, 0.0) / 100.0, Color(0.3, 0.8, 1.0), "CAR")
+	func _bar(p: Vector2, f: float, c: Color, label: String) -> void:
+		draw_rect(Rect2(p + Vector2(44, 0), Vector2(176, 18)), Color(0, 0, 0, 0.6))
+		draw_rect(Rect2(p + Vector2(46, 2), Vector2(172 * clampf(f, 0, 1), 14)), c)
+		draw_string(ThemeDB.fallback_font, p + Vector2(0, 15), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)

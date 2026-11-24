@@ -101,4 +101,61 @@ func _go(name: String) -> void:
 			Input.action_press("move_up")
 			await _wait(2.3)
 			await _capture("04_police_chase")
+		"signals":
+			Game.cash = 1240
+			Game.sig_time = 0.2
+			var n := Vector2i(4, 4)
+			for t in [0.15, 0.35, 0.55]:
+				m.spawn_traffic_at(Vector2i(3, 4), Vector2i(1, 0), t)
+				m.spawn_traffic_at(Vector2i(5, 4), Vector2i(-1, 0), t)
+			m.spawn_traffic_at(Vector2i(4, 3), Vector2i(0, 1), 0.4)
+			m.spawn_traffic_at(Vector2i(4, 5), Vector2i(0, -1), 0.55)
+			for b in [Vector2i(3, 3), Vector2i(4, 3), Vector2i(3, 4), Vector2i(4, 4)]:
+				for i in 4: m.spawn_ped(b)
+			m.player.global_position = Vector3(4 * P + 6.6, 0.2, 4 * P + 6.6)
+			m.cam.global_position = Vector3(0, 0, 0)
+			await _wait(3.8)
+			await _capture("v2/01_traffic_lights")
+		"damage":
+			Game.cash = 1240
+			var z := 4 * P + Game.LANE
+			_clear_lane(z, 0.0, 8 * P)
+			var car = m.spawn_car(Vector3(2.0 * P, 0, z), Game.yaw_of(Vector3(1, 0, 0)), Color(0.1, 0.35, 0.85))
+			m.enter_car(car)
+			car.take_damage(64.0)
+			var wreck = m.spawn_car(Vector3(2.0 * P + 17.0, 0, z - 1.0), Game.yaw_of(Vector3(1, 0.0, 0.4)), Color(0.15, 0.6, 0.25))
+			wreck.take_damage(87.0)
+			wreck.burn_t = 60.0
+			m.cam.global_position = Vector3(0, 0, 0)
+			Input.action_press("move_up", 0.45)
+			await _wait(1.2)
+			Input.action_release("move_up")
+			await _wait(1.0)
+			await _capture("v2/02_damaged_smoking")
+		"explosion":
+			Game.cash = 1240
+			var z := 4 * P + Game.LANE
+			_clear_lane(z, 0.0, 8 * P)
+			m.player.global_position = Vector3(2.0 * P + 1.0, 0.2, 4 * P + 6.5)
+			var c1 = m.spawn_car(Vector3(2.0 * P + 14.0, 0, z), Game.yaw_of(Vector3(1, 0, 0)), Color(0.9, 0.1, 0.1))
+			var c2 = m.spawn_car(Vector3(2.0 * P + 20.5, 0, z - 4.5), Game.yaw_of(Vector3(-1, 0, 0)), Color(0.95, 0.75, 0.1))
+			c1.take_damage(88.0)
+			c1.burn_t = 1.0
+			m.cam.global_position = Vector3(0, 0, 0)
+			await c1.exploded
+			await _wait(0.12)
+			await _capture("v2/03_explosion")
+		"wasted":
+			Game.cash = 1240
+			Game.set_wanted(2)
+			var z := 4 * P + Game.LANE
+			_clear_lane(z, 0.0, 8 * P)
+			var car = m.spawn_car(Vector3(2.0 * P, 0, z), Game.yaw_of(Vector3(1, 0, 0)), Color(0.55, 0.15, 0.6))
+			m.enter_car(car)
+			car.take_damage(88.0)
+			car.burn_t = 1.2
+			m.cam.global_position = Vector3(0, 0, 0)
+			await car.exploded
+			await _wait(0.45)
+			await _capture("v2/04_wasted")
 	get_tree().quit()

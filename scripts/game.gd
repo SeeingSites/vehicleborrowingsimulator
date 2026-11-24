@@ -22,6 +22,13 @@ var touch_handbrake := false
 var force_touch_ui := false
 
 var shot := ""
+var sim_seconds := 0.0      # --sim=N : headless traffic simulation, prints jam metrics
+var traffic_cars := 34
+var car_contacts := 0      # car-vs-car impacts > 3 m/s (sim metric)
+var signals := true         # --no-signals : disable traffic lights / right-of-way (v1 behaviour)
+var sig_time := 0.0
+const SIG_CYCLE := 16.0
+enum Light { GREEN, YELLOW, RED }
 var rng := RandomNumberGenerator.new()
 
 var main: Node = null
@@ -33,12 +40,21 @@ func _ready() -> void:
 			shot = a.substr(7)
 		elif a == "--touch":
 			force_touch_ui = true
+		elif a.begins_with("--sim="):
+			sim_seconds = float(a.substr(6))
+		elif a.begins_with("--cars="):
+			traffic_cars = int(a.substr(7))
+		elif a.begins_with("--seed="):
+			rng.seed = int(a.substr(7))
+		elif a == "--no-signals":
+			signals = false
 	_add_action("move_up", [KEY_W, KEY_UP])
 	_add_action("move_down", [KEY_S, KEY_DOWN])
 	_add_action("move_left", [KEY_A, KEY_LEFT])
 	_add_action("move_right", [KEY_D, KEY_RIGHT])
 	_add_action("enter_exit", [KEY_E, KEY_ENTER])
 	_add_action("handbrake", [KEY_SPACE])
+	_add_action("horn", [KEY_H])
 
 func _add_action(name: String, keys: Array) -> void:
 	if not InputMap.has_action(name):
@@ -81,6 +97,29 @@ func _process(delta: float) -> void:
 		wanted_timer += delta
 		if wanted_timer > WANTED_DECAY:
 			set_wanted(wanted - 1)
+
+func _physics_process(delta: float) -> void:
+	sig_time += delta
+
+func signalled(n: Vector2i) -> bool:
+	var corner := (n.x == 0 or n.x == NB) and (n.y == 0 or n.y == NB)
+	return signals and not corner
+
+func sig_group(n: Vector2i) -> int:
+	return (n.x + n.y) % 2
+
+## Light state for traffic moving along `axis_ns` (true = along Z) at intersection n.
+func light_for(n: Vector2i, axis_ns: bool) -> int:
+	return light_group(sig_group(n), axis_ns)
+
+func light_group(g: int, axis_ns: bool) -> int:
+	var half := SIG_CYCLE * 0.5
+	var t := fmod(sig_time + g * half, SIG_CYCLE)
+	if not axis_ns:
+		t = fmod(t + half, SIG_CYCLE)
+	if t < half - 3.5: return Light.GREEN
+	if t < half - 1.5: return Light.YELLOW
+	return Light.RED
 
 func node_pos(n: Vector2i) -> Vector3:
 	return Vector3(n.x * P, 0.0, n.y * P)

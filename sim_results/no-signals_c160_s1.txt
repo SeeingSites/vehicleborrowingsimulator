@@ -1,0 +1,1 @@
+SIMRESULT {"car_contacts_per_min":2600.8,"cars":160,"cars_ever_stuck_20s":3,"gridlock_pct":0.03,"intersections_per_car_min":3.77,"jam_rate_pct":0.64,"mean_speed_kmh":7.7,"peak_jam_pct":1.88,"seed":1,"signals":false,"sim_seconds":300.0,"wrecks":0}

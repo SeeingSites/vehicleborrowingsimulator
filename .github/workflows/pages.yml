@@ -1,0 +1,82 @@
+name: Deploy web build to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.7.2"
+  GODOT_RELEASE: "4.7.2-stable"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache Godot editor and Web export templates
+        id: godot-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/godot-bin
+            ~/.local/share/godot/export_templates/${{ env.GODOT_VERSION }}.stable
+          key: godot-${{ env.GODOT_RELEASE }}-web
+
+      - name: Install Godot ${{ env.GODOT_RELEASE }} (pinned) and Web templates
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot/releases/download/${GODOT_RELEASE}"
+          mkdir -p ~/godot-bin
+          tpl=$(mktemp -d)
+          curl -fsSL -o /tmp/godot.zip "${base}/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          unzip -o -q /tmp/godot.zip -d ~/godot-bin
+          mv ~/godot-bin/Godot_v${GODOT_RELEASE}_linux.x86_64 ~/godot-bin/godot
+          chmod +x ~/godot-bin/godot
+          curl -fsSL -o /tmp/templates.tpz "${base}/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          # Only the Web templates are needed; skip the other platforms (~1.2 GB).
+          unzip -o -q /tmp/templates.tpz 'templates/web*' 'templates/version.txt' -d "$tpl"
+          dest=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p "$dest"
+          mv "$tpl"/templates/* "$dest"/
+          rm -f /tmp/templates.tpz /tmp/godot.zip
+
+      - name: Import project
+        run: ~/godot-bin/godot --headless --path . --import || true
+
+      - name: Export Web build
+        run: |
+          set -euo pipefail
+          mkdir -p web_build
+          ~/godot-bin/godot --headless --path . --export-release "Web" web_build/index.html
+          test -f web_build/index.wasm
+          rm -f web_build/.gdignore
+          touch web_build/.nojekyll
+          du -sh web_build
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web_build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

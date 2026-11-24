@@ -11,6 +11,9 @@ var roof_mats := []
 var mm_white: PackedVector3Array
 var dash_xf: Array[Transform3D] = []
 var stripe_xf: Array[Transform3D] = []
+# lamp_mats[group][axis_ns 0/1][light 0..2]
+var lamp_mats := []
+const LAMP_COLS := [Color(0.05, 0.95, 0.2), Color(1.0, 0.75, 0.0), Color(1.0, 0.0, 0.0)]
 
 func build(seed_: int) -> void:
 	r.seed = seed_
@@ -39,6 +42,7 @@ func build(seed_: int) -> void:
 			else:
 				_buildings(c, lot)
 	_markings()
+	if Game.signals: _signals()
 
 func _box(pos: Vector3, size: Vector3, mat: Material, collide: bool) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -188,3 +192,66 @@ func _multimesh(mesh: Mesh, xfs: Array, mat: Material) -> void:
 	mmi.multimesh = mm
 	mmi.material_override = mat
 	add_child(mmi)
+
+func _signals() -> void:
+	var dark := Tex.mat_col(Color(0.16, 0.17, 0.18))
+	var pole_xf: Array = []; var arm_xf: Array = []; var house_xf: Array = []; var bar_xf: Array = []
+	var lamp_xf := []
+	for g in 2:
+		lamp_mats.append([])
+		lamp_xf.append([])
+		for a in 2:
+			lamp_mats[g].append([]); lamp_xf[g].append([])
+			for c in 3:
+				var m := StandardMaterial3D.new()
+				m.albedo_color = LAMP_COLS[c]
+				m.emission_enabled = true
+				m.emission = LAMP_COLS[c]
+				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				lamp_mats[g][a].append(m)
+				lamp_xf[g][a].append([])
+	var hw := Game.ROAD_HALF
+	for i in Game.NB + 1:
+		for j in Game.NB + 1:
+			var n := Vector2i(i, j)
+			if (i == 0 or i == Game.NB) and (j == 0 or j == Game.NB): continue
+			var c := Game.node_pos(n)
+			var g := Game.sig_group(n)
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				if not Game.in_grid(n - d): continue
+				var d3 := Vector3(d.x, 0, d.y)
+				var rt := Game.right_of(d)
+				var ns := 1 if d.x == 0 else 0
+				var bas := Basis() if d.x == 0 else Basis(Vector3.UP, PI / 2)
+				var pole := c - d3 * (hw + 1.2) + rt * (hw + 1.2)
+				pole_xf.append(Transform3D(Basis(), pole + Vector3(0, 2.6, 0)))
+				var head := c - d3 * (hw + 0.8) + rt * Game.LANE + Vector3(0, 5.0, 0)
+				var mid := (pole + head) * 0.5
+				arm_xf.append(Transform3D(bas, Vector3(mid.x, 5.1, mid.z)))
+				house_xf.append(Transform3D(bas, head))
+				for k in 3:
+					lamp_xf[g][ns][k].append(Transform3D(bas, head + rt * ((1 - k) * 0.66) + Vector3(0, 0.22, 0)))
+				bar_xf.append(Transform3D(bas, c - d3 * (hw + 2.4) + rt * Game.LANE + Vector3(0, 0.012, 0)))
+	var pm := BoxMesh.new(); pm.size = Vector3(0.25, 5.2, 0.25)
+	var am := BoxMesh.new(); am.size = Vector3(hw + 1.2 - Game.LANE, 0.15, 0.15)
+	var hm := BoxMesh.new(); hm.size = Vector3(2.1, 0.4, 0.8)
+	var lm := BoxMesh.new(); lm.size = Vector3(0.56, 0.1, 0.56)
+	var bm := BoxMesh.new(); bm.size = Vector3(4.4, 0.02, 0.45)
+	_multimesh(pm, pole_xf, dark)
+	_multimesh(am, arm_xf, dark)
+	_multimesh(hm, house_xf, dark)
+	_multimesh(bm, bar_xf, Tex.mat_col(Color(0.95, 0.95, 0.93)))
+	for g in 2:
+		for a in 2:
+			for k in 3:
+				_multimesh(lm, lamp_xf[g][a][k], lamp_mats[g][a][k])
+
+func update_lamps() -> void:
+	for g in lamp_mats.size():
+		for a in 2:
+			var st := Game.light_group(g, a == 1)
+			for k in 3:
+				var m: StandardMaterial3D = lamp_mats[g][a][k]
+				var on := st == k
+				m.albedo_color = LAMP_COLS[k] if on else LAMP_COLS[k].darkened(0.85)
+				m.emission_energy_multiplier = 0.0

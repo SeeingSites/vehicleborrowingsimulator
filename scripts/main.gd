@@ -17,6 +17,11 @@ var n_traffic := 34
 var n_peds := 90
 var bust_t := 0.0
 var police_cd := 0.0
+var shake := 0.0
+var engine_snd: AudioStreamPlayer
+var skid_snd: AudioStreamPlayer
+var horn_snd: AudioStreamPlayer
+const RESPAWN := Vector3(1 * 28.0 - 6.25, 0.2, 1 * 28.0 - 10.0)
 
 func _ready() -> void:
 	Game.main = self
@@ -40,6 +45,7 @@ func _ready() -> void:
 	sun.directional_shadow_max_distance = 140.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
 	add_child(sun)
+	n_traffic = Game.traffic_cars
 	city = City.new()
 	add_child(city)
 	city.build(42)
@@ -63,6 +69,11 @@ func _ready() -> void:
 	touch = load("res://scripts/touch.gd").new()
 	hud.add_child(touch)
 	Game.wanted_changed.connect(_on_wanted)
+	engine_snd = _loop_player("engine", -10.0)
+	skid_snd = _loop_player("skid", -12.0)
+	horn_snd = _loop_player("horn", -6.0)
+	if Game.sim_seconds > 0.0:
+		load("res://scripts/sim.gd").new().run(self)
 	if Game.shot != "":
 		load("res://scripts/shots.gd").new().run(self, Game.shot)
 
@@ -141,9 +152,156 @@ func add_skid(pos: Vector3, yaw: float) -> void:
 	skid_i = (skid_i + 1) % mm.instance_count
 	mm.visible_instance_count = maxi(mm.visible_instance_count, skid_i)
 
+func _loop_player(name: String, db: float) -> AudioStreamPlayer:
+	var a := AudioStreamPlayer.new()
+	a.stream = Sfx.get_stream(name)
+	a.volume_db = db
+	add_child(a)
+	return a
+
+func play_at(name: String, pos: Vector3, db := 0.0) -> void:
+	if Game.sim_seconds > 0.0: return
+	if cam and cam.global_position.distance_to(pos) > 160.0: return
+	var a := AudioStreamPlayer3D.new()
+	a.stream = Sfx.get_stream(name)
+	a.unit_size = 40.0
+	a.max_distance = 180.0
+	a.volume_db = db
+	add_child(a)
+	a.global_position = pos
+	a.play()
+	a.finished.connect(a.queue_free)
+
+func _update_audio() -> void:
+	var c := player_car
+	if c and not c.dead:
+		if not engine_snd.playing: engine_snd.play()
+		var k := clampf(c.speed() / c.max_speed, 0.0, 1.0)
+		engine_snd.pitch_scale = 0.7 + k * 1.9 + absf(c.throttle) * 0.15
+		engine_snd.volume_db = -14.0 + k * 6.0 + absf(c.throttle) * 3.0
+		var sk := c.drifting and c.speed() > 7.0
+		if sk and not skid_snd.playing: skid_snd.play()
+		elif not sk and skid_snd.playing: skid_snd.stop()
+		var hn := Input.is_action_pressed("horn")
+		if hn and not horn_snd.playing: horn_snd.play()
+		elif not hn and horn_snd.playing: horn_snd.stop()
+	else:
+		for a in [engine_snd, skid_snd, horn_snd]:
+			if a.playing: a.stop()
+
+## Fireball, flash, debris, scorch mark, sound and blast damage.
+func explosion(pos: Vector3, src: Node) -> void:
+	play_at("explosion", pos, 6.0)
+	shake = 0.6
+	var root := Node3D.new()
+	add_child(root)
+	root.global_position = pos
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.7, 0.3); light.omni_range = 22.0; light.light_energy = 10.0
+	light.position = Vector3(0, 4, 0)
+	root.add_child(light)
+	var balls := []
+	for spec in [[Color(1.0, 0.95, 0.6), 0.7], [Color(1.0, 0.55, 0.1), 1.0], [Color(0.6, 0.15, 0.05), 1.3]]:
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new(); sm.radius = 1.0; sm.height = 2.0
+		var m := StandardMaterial3D.new()
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(spec[0], 0.8)
+		mi.mesh = sm; mi.material_override = m
+		mi.position = Vector3(0, 1.5, 0)
+		mi.scale = Vector3.ONE * 0.5
+		root.add_child(mi)
+		balls.append([mi, m, spec[1]])
+	var debris := CPUParticles3D.new()
+	var dm := BoxMesh.new(); dm.size = Vector3(0.35, 0.35, 0.35)
+	dm.material = Tex.mat_col(Color(0.12, 0.1, 0.08))
+	debris.mesh = dm; debris.amount = 40; debris.lifetime = 1.4; debris.one_shot = true; debris.explosiveness = 1.0
+	debris.direction = Vector3(0, 1, 0); debris.spread = 80.0
+	debris.initial_velocity_min = 8.0; debris.initial_velocity_max = 18.0
+	debris.position = Vector3(0, 1, 0)
+	root.add_child(debris)
+	debris.emitting = true
+	var flames := CPUParticles3D.new()
+	var fm := SphereMesh.new(); fm.radius = 0.8; fm.height = 1.6; fm.radial_segments = 8; fm.rings = 4
+	var fmat := StandardMaterial3D.new()
+	fmat.vertex_color_use_as_albedo = true
+	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	fm.material = fmat
+	flames.mesh = fm; flames.amount = 70; flames.lifetime = 1.1; flames.one_shot = true; flames.explosiveness = 0.95
+	flames.direction = Vector3(0, 1, 0); flames.spread = 90.0
+	flames.initial_velocity_min = 3.0; flames.initial_velocity_max = 11.0
+	flames.damping_min = 6.0; flames.damping_max = 9.0
+	flames.gravity = Vector3(0, 2.0, 0)
+	flames.scale_amount_min = 0.8; flames.scale_amount_max = 2.2
+	var fc := Curve.new(); fc.add_point(Vector2(0, 0.6)); fc.add_point(Vector2(0.4, 1.0)); fc.add_point(Vector2(1, 1.4))
+	flames.scale_amount_curve = fc
+	var fg := Gradient.new()
+	fg.set_color(0, Color(1.0, 0.95, 0.55, 1.0)); fg.set_color(1, Color(0.15, 0.12, 0.1, 0.0))
+	fg.add_point(0.3, Color(1.0, 0.55, 0.1, 0.95)); fg.add_point(0.6, Color(0.5, 0.15, 0.05, 0.7))
+	flames.color_ramp = fg
+	flames.position = Vector3(0, 1.2, 0)
+	flames.local_coords = false
+	root.add_child(flames)
+	flames.emitting = true
+	var scorch := MeshInstance3D.new()
+	var cm := CylinderMesh.new(); cm.top_radius = 4.0; cm.bottom_radius = 4.0; cm.height = 0.02
+	var sm2 := StandardMaterial3D.new(); sm2.albedo_color = Color(0.05, 0.04, 0.03, 0.7)
+	sm2.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	scorch.mesh = cm; scorch.material_override = sm2
+	add_child(scorch)
+	scorch.global_position = Vector3(pos.x, 0.03, pos.z)
+	var tw := create_tween().set_parallel(true)
+	for b in balls:
+		tw.tween_property(b[0], "scale", Vector3.ONE * 3.2 * b[2], 0.45).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_EXPO)
+		tw.tween_property(b[1], "albedo_color:a", 0.0, 0.9).set_delay(0.25)
+	tw.tween_property(light, "light_energy", 0.0, 0.9)
+	tw.chain().tween_callback(root.queue_free).set_delay(1.8)
+	# blast damage
+	for c in get_tree().get_nodes_in_group("cars"):
+		if c == src or c.dead: continue
+		var d: float = c.global_position.distance_to(pos)
+		if d < 10.0:
+			c.take_damage(95.0 * (1.0 - d / 10.0))
+			c.velocity += (c.global_position - pos).normalized() * 12.0 * (1.0 - d / 10.0)
+	for p in get_tree().get_nodes_in_group("peds"):
+		var d: float = p.global_position.distance_to(pos)
+		if d < 7.0 and p.alive: p.kill((p.global_position - pos).normalized())
+	if src == player_car or (player.visible and player.global_position.distance_to(pos) < 6.5):
+		wasted()
+
+func wasted() -> void:
+	if player.dying: return
+	player.dying = true
+	player.health = 0.0
+	if player_car:
+		var c := player_car
+		c.ctrl = Car.Ctrl.NONE
+		player.global_position = c.global_position
+		player_car = null
+	else:
+		player.rotation.x = PI / 2   # knocked flat
+	Engine.time_scale = 0.4
+	hud.show_wasted(true)
+	await get_tree().create_timer(4.0, true, false, true).timeout
+	Engine.time_scale = 1.0
+	hud.show_wasted(false)
+	player.rotation = Vector3.ZERO
+	player.global_position = RESPAWN
+	player.visible = true
+	player.collision_layer = 4
+	player.collision_mask = 1 | 2
+	player.health = 100.0
+	player.dying = false
+	Game.set_wanted(0)
+
 func _physics_process(dt: float) -> void:
-	if Input.is_action_just_pressed("enter_exit"):
+	if Input.is_action_just_pressed("enter_exit") and not player.dying:
 		toggle_car()
+	if city.lamp_mats.size() > 0: city.update_lamps()
+	if player_car: player.global_position = player_car.global_position + Vector3(0, 0.2, 0)
+	_update_audio()
 	_police_logic(dt)
 	_recycle()
 
@@ -159,12 +317,14 @@ func toggle_car() -> void:
 		return
 	var best: Car = null; var bd := 4.5
 	for c in get_tree().get_nodes_in_group("cars"):
+		if c.dead: continue
 		var d: float = c.global_position.distance_to(player.global_position)
 		if d < bd: bd = d; best = c
 	if best == null: return
 	enter_car(best)
 
 func enter_car(c: Car) -> void:
+	if c.dead: return
 	if c.ctrl == Car.Ctrl.TRAFFIC or c.ctrl == Car.Ctrl.POLICE:
 		# carjack: throw the driver out
 		var p := spawn_ped(Vector2i(clampi(int(c.global_position.x / Game.P), 0, Game.NB - 1), clampi(int(c.global_position.z / Game.P), 0, Game.NB - 1)))
@@ -179,7 +339,7 @@ func enter_car(c: Car) -> void:
 func _police_logic(dt: float) -> void:
 	var cops := []
 	for c in get_tree().get_nodes_in_group("cars"):
-		if c.ctrl == Car.Ctrl.POLICE: cops.append(c)
+		if c.ctrl == Car.Ctrl.POLICE and not c.dead: cops.append(c)
 	police_cd -= dt
 	if Game.wanted > 0 and cops.size() < mini(Game.wanted, 4) and police_cd <= 0.0:
 		police_cd = 3.0
@@ -191,7 +351,7 @@ func _police_logic(dt: float) -> void:
 		var slow: bool = player_car == null or player_car.speed() < 2.0
 		if d < (5.0 if player_car == null else 5.5) and slow: near = true
 	bust_t = bust_t + dt if near else 0.0
-	if bust_t > 1.0 and Game.wanted > 0:
+	if bust_t > 1.0 and Game.wanted > 0 and not player.dying:
 		bust_t = 0.0
 		Game.message.emit("BUSTED!", Color(0.4, 0.6, 1.0))
 		Game.add_cash(-mini(Game.cash, 100))
@@ -199,6 +359,17 @@ func _police_logic(dt: float) -> void:
 		if player_car: toggle_car()
 
 func _recycle() -> void:
+	for w in get_tree().get_nodes_in_group("wrecks"):
+		w.set_meta("age", w.get_meta("age", 0.0) + get_physics_process_delta_time())
+		if w.get_meta("age") > 60.0 and w != player_car and w.global_position.distance_to(cam.global_position) > 70.0:
+			w.queue_free()
+	var live := 0
+	for c in get_tree().get_nodes_in_group("cars"):
+		if c.ctrl == Car.Ctrl.TRAFFIC and not c.dead: live += 1
+	if live < n_traffic and Game.shot == "":
+		var c := spawn_traffic_random()
+		if c.global_position.distance_to(player_target().global_position) < 45.0:
+			c.queue_free()
 	for p in get_tree().get_nodes_in_group("dead_peds"):
 		if p.dead_t > 20.0:
 			p.queue_free()
@@ -214,3 +385,6 @@ func _process(dt: float) -> void:
 	var want := Vector3(look.x, cam_h, look.z)
 	cam.global_position = cam.global_position.lerp(want, 1.0 - exp(-6.0 * dt)) if cam.global_position.y > 1.0 else want
 	cam.global_position.y = cam_h
+	if shake > 0.0:
+		shake -= dt
+		cam.global_position += Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * shake * 1.5
