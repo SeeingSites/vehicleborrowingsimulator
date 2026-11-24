@@ -55,6 +55,10 @@ func _ready() -> void:
 	_add_action("enter_exit", [KEY_E, KEY_ENTER])
 	_add_action("handbrake", [KEY_SPACE])
 	_add_action("horn", [KEY_H])
+	_add_action("fire", [KEY_CTRL, KEY_F])
+	_add_action("weapon_next", [KEY_Q, KEY_TAB])
+	var mb := InputEventMouseButton.new(); mb.button_index = MOUSE_BUTTON_LEFT
+	InputMap.action_add_event("fire", mb)
 
 func _add_action(name: String, keys: Array) -> void:
 	if not InputMap.has_action(name):

@@ -30,6 +30,9 @@ static func get_stream(name: String) -> AudioStreamWAV:
 		"horn": s = _make_horn()
 		"thud": s = _make_thud()
 		"splat": s = _make_splat()
+		"pistol": s = _wav(_burst(0.22, 0.6, 22.0, 140.0, 0.6, 21), false)
+		"smg": s = _wav(_burst(0.12, 0.7, 35.0, 180.0, 0.4, 22), false)
+		"pickup": s = _make_pickup()
 		_: s = _make_explosion()
 	_cache[name] = s
 	return s
@@ -103,3 +106,12 @@ static func _make_explosion() -> AudioStreamWAV:
 	var o := _burst(2.2, 0.04, 2.2, 40.0, 0.9, 13)
 	for i in o.size(): o[i] = clampf(o[i] * 1.6, -1.0, 1.0)
 	return _wav(o, false)
+
+static func _make_pickup() -> AudioStreamWAV:
+	var n := int(RATE * 0.25)
+	var out := PackedFloat32Array(); out.resize(n)
+	for i in n:
+		var t := float(i) / RATE
+		var f := 660.0 if t < 0.08 else (880.0 if t < 0.16 else 1320.0)
+		out[i] = sin(TAU * f * t) * 0.4 * exp(-t * 6.0)
+	return _wav(out, false)

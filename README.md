@@ -1,8 +1,9 @@
 # Downtown Rampage — GTA2-style top-down prototype (Godot 4.7.2)
 
-Procedural top-down city with tilted 3D buildings (perspective camera looking straight down),
-on-foot player, enterable cars with arcade drift handling, AI traffic, wandering pedestrians,
-cash / wanted stars / speed HUD, chasing police, touch controls and a Web (HTML5) export.
+Top-down city (perspective camera looking straight down) built from Kenney's CC0 City Kit buildings,
+on-foot player, 8 enterable car types (Kenney Car Kit) with their own arcade handling, AI traffic,
+wandering pedestrians, pistol + SMG with pickups and drive-bys, rotating mini-map, cash / wanted stars /
+speedometer / ammo HUD, chasing police, touch controls and a Web (HTML5) export. See `CREDITS.md`.
 
 ## Run
     ./tools/godot --path .                       # play (desktop window)
@@ -38,6 +39,10 @@ Notes
 - E or Enter (touch: ENTER): enter the nearest car (carjacks traffic) / exit
 - Space (touch: DRIFT): handbrake / drift
 - H (touch: HORN): horn
+- Ctrl / F / left click (touch: FIRE): shoot. Q / Tab (touch: WPN): next weapon. On foot you shoot where you
+  face; in a car it's a forward drive-by. Pistol and SMG pickups (spinning boxes on sidewalk corners, also
+  shown on the mini-map) give ammo and respawn after 30 s. Shooting peds: +$10 and +1 star; hitting cars
+  damages them; hitting police always adds a star.
 - Run over pedestrians: +$10 and +1 wanted star. Police spawn at 1+ star (one car per star, max 4)
   and route along the road grid; stop next to a cop and you're BUSTED (−$100, stars cleared).
   Stars decay one every 25 s.
@@ -47,9 +52,22 @@ Notes
 - Traffic lights at every intersection except the four map corners (14 s cycle, all-red clearance). Traffic
   stops on red/yellow, doesn't enter a blocked junction, and left turns yield to oncoming cars.
 
+## HUD
+- Top left: mini-map (player-up, rotates with you; N marker; roads, traffic, flashing police blips, pickups).
+- Below it, only in a car: speedometer gauge with km/h and the car type.
+- Top centre: wanted stars (moved below the mini-map on portrait screens). Top right: cash, HP, car health,
+  weapon and ammo.
+- Portrait phones switch the UI to a 720x1280 layout and widen the camera.
+
+## Car types
+sedan, sports, hatchback, taxi, SUV, van, truck, police — each with its own length, top speed,
+acceleration, turn rate, grip/drift grip and mass (heavier cars take less
+crash damage). Traffic and parking lots draw from a weighted mix (`TRAFFIC_MIX` in `scripts/main.gd`; data in
+`Car.TYPES`).
+
 ## Sound
 All audio is synthesised at startup in `scripts/sfx.gd` (engine loop with speed-linked pitch, tyre
-skid, two-tone siren, horn, collision thud, pedestrian splat, explosion). No audio assets.
+skid, two-tone siren, horn, collision thud, pedestrian splat, explosion, pistol, SMG, pickup). No audio assets.
 
 ## Traffic simulation (jam metric)
     ./tools/godot --headless --fixed-fps 60 --path . -- --sim=600 --seed=1 --cars=100 [--no-signals]
@@ -60,7 +78,9 @@ after a 30 s warm-up). `--no-signals` reproduces the v1 traffic AI. Results are 
 - `scripts/game.gd` (autoload): constants, input map, cash/wanted state, touch input
 - `scripts/main.gd`: world setup, spawning, enter/exit, police logic, speed-zoom camera, skid marks
 - `scripts/city.gd`: 8x8 block grid, sidewalks, buildings with roof clutter, parks, parking lots, markings
-- `scripts/car.gd`: one arcade car model used by player, traffic AI and police AI
+- `scripts/car.gd`: arcade car (8 types) used by player, traffic AI and police AI
+- `scripts/kit.gd`: loads/caches the Kenney GLB models; `scripts/weapons.gd`: guns, pickups, hitscan
 - `scripts/ped.gd`, `scripts/player.gd`, `scripts/hud.gd`, `scripts/touch.gd`, `scripts/tex.gd`
 - `scripts/sfx.gd`: procedural sounds; `scripts/sim.gd`: headless traffic simulation
-- `scripts/shots.gd`: scripted scenarios for screenshots (`-- --shot=onfoot|driving|traffic|police|signals|damage|explosion|wasted`)
+- `scripts/shots.gd`: scripted scenarios for screenshots (`-- --shot=onfoot|driving|traffic|police|signals|damage|explosion|wasted|shooting|driveby|cars`)
+- `assets/kenney/`: CC0 models (see `CREDITS.md`)

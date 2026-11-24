@@ -62,40 +62,61 @@ var siren_b: MeshInstance3D
 var skid_t := 0.0
 var siren_light: OmniLight3D
 
-func setup(col: Color, police := false) -> void:
+## Car types: Kenney Car Kit (CC0) model + handling.
+## [model, target length m, max_speed, accel, turn_rate, grip, drift_grip, mass]
+const TYPES := {
+	"sedan":     ["sedan",            4.4, 32.0, 15.0, 2.7, 9.0, 1.2, 1.0],
+	"sports":    ["sedan-sports",     4.3, 42.0, 22.0, 3.0, 10.5, 1.5, 0.9],
+	"hatchback": ["hatchback-sports", 4.0, 35.0, 18.0, 3.4, 8.0, 1.0, 0.8],
+	"taxi":      ["taxi",             4.6, 33.0, 15.0, 2.8, 9.0, 1.2, 1.0],
+	"suv":       ["suv",              4.8, 30.0, 13.0, 2.4, 8.0, 1.4, 1.4],
+	"van":       ["van",              5.0, 26.0, 10.0, 2.1, 6.5, 1.5, 1.8],
+	"truck":     ["delivery",         6.2, 22.0, 7.0, 1.7, 6.0, 1.8, 2.8],
+	"police":    ["police",           4.8, 34.0, 17.0, 2.9, 9.5, 1.3, 1.2],
+}
+var car_type := "sedan"
+var mass := 1.0
+var dmg_overlay: StandardMaterial3D
+var model: Node3D
+var roof_h := 1.5
+
+func setup(col: Color, police := false, type := "") -> void:
 	body_color = col
 	is_police = police
+	car_type = "police" if police else (type if TYPES.has(type) else "sedan")
+	var t: Array = TYPES[car_type]
+	max_speed = t[2]; accel = t[3]; turn_rate = t[4]; grip = t[5]; drift_grip = t[6]; mass = t[7]
 	collision_layer = 2
 	collision_mask = 1 | 2
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 	add_to_group("cars")
+	var path := Kit.car_path(t[0])
+	var bb := Kit.aabb(path)
+	var sc: float = t[1] / bb.size.z
+	model = Kit.instance(path)
+	model.scale = Vector3.ONE * sc
+	model.rotation.y = PI   # Kenney cars face +Z, ours face -Z
+	model.position = Vector3(-bb.get_center().x * sc, 0.0, bb.get_center().z * sc)
+	add_child(model)
+	roof_h = bb.end.y * sc
 	var cs := CollisionShape3D.new()
-	var sh := BoxShape3D.new(); sh.size = Vector3(2.0, 1.2, 4.3)
-	cs.shape = sh; cs.position = Vector3(0, 0.7, 0)
+	var sh := BoxShape3D.new(); sh.size = Vector3(bb.size.x * sc * 0.92, minf(roof_h, 2.2), t[1] * 0.96)
+	cs.shape = sh; cs.position = Vector3(0, 0.1 + sh.size.y * 0.5, 0)
 	add_child(cs)
-	body_mat = StandardMaterial3D.new()
-	body_mat.albedo_color = Color(0.95, 0.95, 0.97) if police else col
-	body_mat.roughness = 0.5
-	var glass := Tex.mat_col(Color(0.10, 0.13, 0.18))
-	var dark := Tex.mat_col(Color(0.06, 0.06, 0.06))
-	_part(Vector3(0, 0.55, 0), Vector3(2.0, 0.6, 4.3), body_mat)
+	# damage tint: a translucent dark overlay over every surface of the model
+	dmg_overlay = StandardMaterial3D.new()
+	dmg_overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	dmg_overlay.albedo_color = Color(0.08, 0.06, 0.05, 0.0)
+	dmg_overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_apply_overlay(model)
+	body_mat = StandardMaterial3D.new()  # kept for API compatibility
 	if police:
-		_part(Vector3(0, 0.87, 1.2), Vector3(2.02, 0.05, 1.4), Tex.mat_col(Color(0.08, 0.10, 0.30)))
-		_part(Vector3(0, 0.87, -1.5), Vector3(2.02, 0.05, 1.1), Tex.mat_col(Color(0.08, 0.10, 0.30)))
-	glass_mi = _part(Vector3(0, 1.08, 0.25), Vector3(1.7, 0.5, 2.2), glass)
-	_part(Vector3(0, 1.35, 0.35), Vector3(1.6, 0.06, 1.5), body_mat)
-	for sx in [-1.0, 1.0]:
-		for sz in [-1.35, 1.35]:
-			_part(Vector3(sx * 0.98, 0.35, sz), Vector3(0.3, 0.6, 0.85), dark)
-		_part(Vector3(sx * 0.65, 0.6, -2.16), Vector3(0.45, 0.2, 0.06), Tex.mat_col(Color(1.0, 0.95, 0.7), true))
-		_part(Vector3(sx * 0.70, 0.6, 2.16), Vector3(0.4, 0.2, 0.06), Tex.mat_col(Color(0.9, 0.1, 0.1), true))
-	if police:
-		siren_a = _part(Vector3(-0.42, 1.5, 0.35), Vector3(0.8, 0.28, 0.5), Tex.mat_col(Color(1, 0.1, 0.1), true))
-		siren_b = _part(Vector3(0.42, 1.5, 0.35), Vector3(0.8, 0.28, 0.5), Tex.mat_col(Color(0.15, 0.35, 1), true))
+		siren_a = _part(Vector3(-0.42, roof_h + 0.12, 0.2), Vector3(0.8, 0.24, 0.45), Tex.mat_col(Color(1, 0.1, 0.1), true))
+		siren_b = _part(Vector3(0.42, roof_h + 0.12, 0.2), Vector3(0.8, 0.24, 0.45), Tex.mat_col(Color(0.15, 0.35, 1), true))
 		siren_light = OmniLight3D.new()
 		siren_light.omni_range = 7.0
 		siren_light.light_energy = 3.0
-		siren_light.position = Vector3(0, 2.5, 0.3)
+		siren_light.position = Vector3(0, roof_h + 1.2, 0.3)
 		add_child(siren_light)
 		siren_snd = AudioStreamPlayer3D.new()
 		siren_snd.stream = Sfx.get_stream("siren")
@@ -103,6 +124,10 @@ func setup(col: Color, police := false) -> void:
 		siren_snd.max_distance = 140.0
 		siren_snd.volume_db = -8.0
 		add_child(siren_snd)
+
+func _apply_overlay(n: Node) -> void:
+	if n is MeshInstance3D: (n as MeshInstance3D).material_overlay = dmg_overlay
+	for c in n.get_children(): _apply_overlay(c)
 
 func _part(p: Vector3, s: Vector3, m: Material) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
@@ -223,8 +248,8 @@ func _drive(dt: float) -> void:
 	if impact > 7.0 and hit_cd <= 0.0:
 		hit_cd = 0.4
 		var dmg := (impact - 7.0) * 5.0
-		take_damage(dmg)
-		if other is Car: other.take_damage(dmg * 0.8)
+		take_damage(dmg / mass)
+		if other is Car: other.take_damage(dmg * 0.8 * mass / other.mass)
 		if Game.main: Game.main.play_at("thud", global_position, clampf(-14.0 + impact, -14.0, 4.0))
 	global_position.y = 0.0
 	rotation.x = 0.0; rotation.z = 0.0
@@ -240,8 +265,7 @@ func take_damage(d: float) -> void:
 	if dead or d <= 0.0: return
 	health -= d
 	var k := clampf((100.0 - health) / 100.0, 0.0, 1.0)
-	var base := Color(0.95, 0.95, 0.97) if is_police else body_color
-	body_mat.albedo_color = base.lerp(Color(0.12, 0.1, 0.09), k * 0.7)
+	dmg_overlay.albedo_color.a = k * 0.6
 	if health < 45.0: _ensure_smoke()
 	if health < 15.0 and burn_t < 0.0:
 		ignite(Game.rng.randf_range(3.0, 4.5))
@@ -300,8 +324,7 @@ func explode() -> void:
 	health = 0.0
 	burn_t = -1.0
 	if ctrl == Ctrl.POLICE and siren_snd: siren_snd.stop()
-	body_mat.albedo_color = Color(0.09, 0.08, 0.07)
-	glass_mi.material_override = Tex.mat_col(Color(0.03, 0.03, 0.03))
+	dmg_overlay.albedo_color = Color(0.05, 0.04, 0.03, 0.88)
 	if fire: fire.emitting = false
 	if fire_light: fire_light.queue_free(); fire_light = null
 	_ensure_smoke()

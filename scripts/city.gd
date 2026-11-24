@@ -86,35 +86,45 @@ func _buildings(c: Vector3, lot: float) -> void:
 	for cell in cells:
 		var cc: Vector3 = cell[0]
 		var sz: Vector2 = cell[1] - Vector2(0.4, 0.4)
-		var height := r.randf_range(6.0, 12.0)
-		var hr := r.randf()
-		if hr < 0.35: height = r.randf_range(13.0, 21.0)
-		elif hr < 0.45: height = r.randf_range(22.0, 27.0)
-		height = snappedf(height, 3.0)
-		var fm = facade_mats[r.randi() % facade_mats.size()]
-		_box(cc + Vector3(0, 0.2 + height * 0.5, 0), Vector3(sz.x, height, sz.y), fm, true)
-		var rm = roof_mats[r.randi() % roof_mats.size()]
-		var top := 0.2 + height
-		# parapet lip + recessed roof
-		_box(cc + Vector3(0, top + 0.15, 0), Vector3(sz.x + 0.3, 0.3, sz.y + 0.3), Tex.mat_col(Color(0.50, 0.48, 0.46)), false)
-		_box(cc + Vector3(0, top + 0.2, 0), Vector3(sz.x - 0.6, 0.3, sz.y - 0.6), rm, false)
-		# roof clutter: AC units, vents, water tanks
-		for k in r.randi_range(1, 3):
-			var off := Vector3(r.randf_range(-0.3, 0.3) * sz.x, 0, r.randf_range(-0.3, 0.3) * sz.y)
-			var kind := r.randf()
-			if kind < 0.6:
-				_box(cc + off + Vector3(0, top + 0.75, 0), Vector3(1.4, 0.8, 1.0), Tex.mat_col(Color(0.80, 0.80, 0.82)), false)
-				_box(cc + off + Vector3(0, top + 1.17, 0), Vector3(0.9, 0.05, 0.6), Tex.mat_col(Color(0.25, 0.25, 0.27)), false)
-			elif kind < 0.85:
-				var mi := MeshInstance3D.new()
-				var cm := CylinderMesh.new()
-				cm.top_radius = 1.0; cm.bottom_radius = 1.0; cm.height = 2.0
-				mi.mesh = cm
-				mi.material_override = Tex.mat_col(Color(0.55, 0.38, 0.25))
-				mi.position = cc + off + Vector3(0, top + 1.35, 0)
-				add_child(mi)
-			else:
-				_box(cc + off + Vector3(0, top + 0.9, 0), Vector3(2.0, 1.2, 2.0), Tex.mat_col(Color(0.62, 0.60, 0.56)), false)
+		_kenney_building(cc, sz, c)
+
+## Place a Kenney City Kit (CC0) building in a lot cell, facing the street, scaled to fit.
+func _kenney_building(cc: Vector3, sz: Vector2, block_c: Vector3) -> void:
+	var tall := r.randf() < 0.2
+	var pool := Kit.BUILDINGS.slice(14) if tall else Kit.BUILDINGS.slice(0, 14)
+	var name: String = pool[r.randi() % pool.size()]
+	var path := Kit.building_path(name)
+	var bb := Kit.aabb(path)
+	# face the nearest street: direction from block centre to cell centre (or a random side)
+	var off := cc - block_c
+	var face := Vector3(signf(off.x), 0, 0) if absf(off.x) > absf(off.z) else Vector3(0, 0, signf(off.z))
+	if off.length() < 0.5:
+		face = [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)][r.randi() % 4]
+	var yaw := atan2(face.x, face.z)
+	var quarter := absf(face.x) > 0.5
+	var w := bb.size.z if quarter else bb.size.x
+	var d := bb.size.x if quarter else bb.size.z
+	var s := minf(sz.x / w, sz.y / d)
+	var hs := s * r.randf_range(1.0, 1.2)
+	var height := bb.size.y * hs
+	if height > 20.0: hs *= 20.0 / height
+	var inst := Kit.instance(path)
+	inst.scale = Vector3(s, hs, s)
+	inst.rotation.y = yaw
+	add_child(inst)
+	var centre := Basis(Vector3.UP, yaw) * (bb.get_center() * Vector3(s, 0, s))
+	inst.position = Vector3(cc.x - centre.x, 0.2, cc.z - centre.z)
+	var foot := Vector3(w * s, bb.size.y * hs, d * s)
+	var sb := StaticBody3D.new()
+	sb.collision_layer = 1
+	sb.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	var sh := BoxShape3D.new()
+	sh.size = foot * Vector3(0.92, 1.0, 0.92)
+	cs.shape = sh
+	sb.position = Vector3(cc.x, 0.2 + foot.y * 0.5, cc.z)
+	sb.add_child(cs)
+	add_child(sb)
 
 func _park(c: Vector3, lot: float) -> void:
 	_box(c + Vector3(0, 0.22, 0), Vector3(lot, 0.05, lot), Tex.mat_tex(Tex.grass(), 6.0), false)

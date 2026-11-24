@@ -15,10 +15,13 @@ func _ready() -> void:
 func _base() -> Vector2:
 	return Vector2(stick_origin.x, size.y + stick_origin.y)
 
-func _enter_btn() -> Vector2: return Vector2(size.x - 150, size.y - 260)
-func _drift_btn() -> Vector2: return Vector2(size.x - 260, size.y - 130)
-func _horn_btn() -> Vector2: return Vector2(size.x - 330, size.y - 290)
+func _enter_btn() -> Vector2: return Vector2(size.x - 170, size.y - 270)
+func _drift_btn() -> Vector2: return Vector2(size.x - 290, size.y - 110)
+func _horn_btn() -> Vector2: return Vector2(size.x - 340, size.y - 300)
 var horn_id := -1
+var fire_id := -1
+func _fire_btn() -> Vector2: return Vector2(size.x - 110, size.y - 110)
+func _wpn_btn() -> Vector2: return Vector2(size.x - 60, size.y - 360)
 
 func _input(ev: InputEvent) -> void:
 	if not visible: return
@@ -33,6 +36,14 @@ func _input(ev: InputEvent) -> void:
 				Input.parse_input_event(a)
 				var b := InputEventAction.new(); b.action = "enter_exit"; b.pressed = false
 				Input.parse_input_event.call_deferred(b)
+			elif ev.position.distance_to(_fire_btn()) < 70:
+				fire_id = ev.index
+				Input.action_press("fire")
+			elif ev.position.distance_to(_wpn_btn()) < 42:
+				var a2 := InputEventAction.new(); a2.action = "weapon_next"; a2.pressed = true
+				Input.parse_input_event(a2)
+				var b2 := InputEventAction.new(); b2.action = "weapon_next"; b2.pressed = false
+				Input.parse_input_event.call_deferred(b2)
 			elif ev.position.distance_to(_horn_btn()) < 50:
 				horn_id = ev.index
 				Input.action_press("horn")
@@ -43,6 +54,8 @@ func _input(ev: InputEvent) -> void:
 			if ev.index == stick_id:
 				stick_id = -1; stick_pos = Vector2.ZERO; Game.touch_vec = Vector2.ZERO
 				stick_origin = Vector2(170, -170)
+			if ev.index == fire_id:
+				fire_id = -1; Input.action_release("fire")
 			if ev.index == horn_id:
 				horn_id = -1; Input.action_release("horn")
 			if ev.index == hb_id:
@@ -59,7 +72,7 @@ func _draw() -> void:
 	draw_arc(b, RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	draw_circle(b + stick_pos, 48, Color(1, 1, 1, 0.45))
 	var font := ThemeDB.fallback_font
-	for pair in [[_enter_btn(), "ENTER", Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0]]:
+	for pair in [[_enter_btn(), "ENTER", Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0], [_fire_btn(), "FIRE", Color(0.95, 0.15, 0.15, 0.5), 70.0], [_wpn_btn(), "WPN", Color(0.9, 0.8, 0.2, 0.45), 40.0]]:
 		draw_circle(pair[0], pair[3], pair[2])
 		draw_arc(pair[0], pair[3], 0, TAU, 48, Color(1, 1, 1, 0.6), 3.0)
 		draw_string(font, pair[0] + Vector2(-38, 8), pair[1], HORIZONTAL_ALIGNMENT_CENTER, 76, 20 if pair[3] < 60 else 24, Color.WHITE)

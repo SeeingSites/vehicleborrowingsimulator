@@ -18,6 +18,8 @@ var n_peds := 90
 var bust_t := 0.0
 var police_cd := 0.0
 var shake := 0.0
+var weapons
+var fps_t := 0.0
 var engine_snd: AudioStreamPlayer
 var skid_snd: AudioStreamPlayer
 var horn_snd: AudioStreamPlayer
@@ -56,6 +58,8 @@ func _ready() -> void:
 	cam.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(cam)
 	cam.make_current()
+	get_viewport().size_changed.connect(_on_resize)
+	_on_resize()
 	player = Player.new()
 	add_child(player)
 	player.global_position = Vector3(3 * Game.P + 6.25, 0.2, 3 * Game.P + 12.0)
@@ -64,10 +68,14 @@ func _ready() -> void:
 		c.ctrl = Car.Ctrl.NONE
 	for i in n_traffic: spawn_traffic_random()
 	for i in n_peds: spawn_ped(Vector2i(Game.rng.randi() % Game.NB, Game.rng.randi() % Game.NB))
+	weapons = load("res://scripts/weapons.gd").new()
+	add_child(weapons)
+	weapons.setup(self)
 	hud = load("res://scripts/hud.gd").new()
 	add_child(hud)
 	touch = load("res://scripts/touch.gd").new()
 	hud.add_child(touch)
+	hud.touch_ui = touch
 	Game.wanted_changed.connect(_on_wanted)
 	engine_snd = _loop_player("engine", -10.0)
 	skid_snd = _loop_player("skid", -12.0)
@@ -77,9 +85,14 @@ func _ready() -> void:
 	if Game.shot != "":
 		load("res://scripts/shots.gd").new().run(self, Game.shot)
 
-func spawn_car(pos: Vector3, yaw: float, col: Color, police := false) -> Car:
+const TRAFFIC_MIX := ["sedan", "sedan", "sedan", "taxi", "taxi", "sports", "hatchback", "suv", "van", "truck"]
+
+func random_type() -> String:
+	return TRAFFIC_MIX[Game.rng.randi() % TRAFFIC_MIX.size()]
+
+func spawn_car(pos: Vector3, yaw: float, col: Color, police := false, type := "") -> Car:
 	var c := Car.new()
-	c.setup(col, police)
+	c.setup(col, police, type if type != "" else random_type())
 	add_child(c)
 	c.global_position = Vector3(pos.x, 0, pos.z)
 	c.rotation.y = yaw
@@ -376,6 +389,11 @@ func _recycle() -> void:
 			spawn_ped(Vector2i(Game.rng.randi() % Game.NB, Game.rng.randi() % Game.NB))
 
 func _process(dt: float) -> void:
+	if OS.has_feature("web") or OS.get_environment("FPSLOG") != "":
+		fps_t += dt
+		if fps_t > 5.0:
+			fps_t = 0.0
+			print("FPS %d draws %d objs %d" % [Engine.get_frames_per_second(), Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)])
 	var tgt := player_target()
 	var vel: Vector3 = player_car.velocity if player_car else Vector3.ZERO
 	var spd := vel.length()
@@ -388,3 +406,13 @@ func _process(dt: float) -> void:
 	if shake > 0.0:
 		shake -= dt
 		cam.global_position += Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)) * shake * 1.5
+
+
+# Portrait phones: keep the UI at a sane scale and widen the camera so the
+# street view isn't a narrow slit.
+func _on_resize() -> void:
+	var ws := DisplayServer.window_get_size()
+	var portrait := ws.y > ws.x
+	get_window().content_scale_size = Vector2i(720, 1280) if portrait else Vector2i(1280, 720)
+	cam.keep_aspect = Camera3D.KEEP_WIDTH if portrait else Camera3D.KEEP_HEIGHT
+	cam.fov = 65.0 if portrait else 50.0
