@@ -1,0 +1,190 @@
+class_name City
+extends Node3D
+## Procedural GTA2-style city: grid of roads, raised sidewalks, building blocks with
+## textured facades and roof clutter, parks and parking lots.
+
+var P := Game.P
+var parked_spots: Array = []   # [Vector3 pos, float yaw]
+var r := RandomNumberGenerator.new()
+var facade_mats := []
+var roof_mats := []
+var mm_white: PackedVector3Array
+var dash_xf: Array[Transform3D] = []
+var stripe_xf: Array[Transform3D] = []
+
+func build(seed_: int) -> void:
+	r.seed = seed_
+	for i in 6: facade_mats.append(Tex.mat_tex(Tex.facade(i), 6.0))
+	for i in 5: roof_mats.append(Tex.mat_tex(Tex.roof(i), 8.0))
+	var size := Game.NB * P
+	# outer ground (grass/dirt) and road asphalt
+	_box(Vector3(size * 0.5, -0.06, size * 0.5), Vector3(size + 200, 0.1, size + 200), Tex.mat_tex(Tex.grass(), 6.0, Color(0.8, 0.85, 0.7)), false)
+	_box(Vector3(size * 0.5, -0.01, size * 0.5), Vector3(size + Game.ROAD_HALF * 2, 0.02, size + Game.ROAD_HALF * 2), Tex.mat_tex(Tex.asphalt(), 8.0), false)
+	var walk_mat := Tex.mat_tex(Tex.sidewalk(), 4.0, Color(0.86, 0.84, 0.82))
+	var curb := Tex.mat_col(Color(0.55, 0.53, 0.50))
+	for bi in Game.NB:
+		for bj in Game.NB:
+			var c := Vector3((bi + 0.5) * P, 0.0, (bj + 0.5) * P)
+			var bw := P - Game.ROAD_HALF * 2
+			_box(c + Vector3(0, 0.1, 0), Vector3(bw, 0.2, bw), walk_mat, false)
+			for sd in [-1, 1]:
+				_box(c + Vector3(sd * (bw * 0.5 - 0.15), 0.11, 0), Vector3(0.3, 0.22, bw), curb, false)
+				_box(c + Vector3(0, 0.11, sd * (bw * 0.5 - 0.15)), Vector3(bw, 0.22, 0.3), curb, false)
+			var lot := bw - Game.WALK * 2
+			var roll := r.randf()
+			if roll < 0.12:
+				_park(c, lot)
+			elif roll < 0.22:
+				_parking(c, lot)
+			else:
+				_buildings(c, lot)
+	_markings()
+
+func _box(pos: Vector3, size: Vector3, mat: Material, collide: bool) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = size
+	mi.mesh = bm
+	mi.material_override = mat
+	mi.position = pos
+	add_child(mi)
+	if collide:
+		var sb := StaticBody3D.new()
+		sb.collision_layer = 1
+		sb.collision_mask = 0
+		var cs := CollisionShape3D.new()
+		var sh := BoxShape3D.new()
+		sh.size = size
+		cs.shape = sh
+		sb.position = pos
+		sb.add_child(cs)
+		add_child(sb)
+	return mi
+
+func _buildings(c: Vector3, lot: float) -> void:
+	var split := r.randi_range(1, 3)
+	var cells := []
+	if split == 1:
+		cells.append([c, Vector2(lot, lot)])
+	elif split == 2:
+		var a := r.randf_range(0.35, 0.65) * lot
+		if r.randf() < 0.5:
+			cells.append([c + Vector3(-lot * 0.5 + a * 0.5, 0, 0), Vector2(a, lot)])
+			cells.append([c + Vector3(a * 0.5, 0, 0), Vector2(lot - a, lot)])
+		else:
+			cells.append([c + Vector3(0, 0, -lot * 0.5 + a * 0.5), Vector2(lot, a)])
+			cells.append([c + Vector3(0, 0, a * 0.5), Vector2(lot, lot - a)])
+	else:
+		var h := lot * 0.5
+		for dx in [-1, 1]:
+			for dz in [-1, 1]:
+				cells.append([c + Vector3(dx * h * 0.5, 0, dz * h * 0.5), Vector2(h, h)])
+	for cell in cells:
+		var cc: Vector3 = cell[0]
+		var sz: Vector2 = cell[1] - Vector2(0.4, 0.4)
+		var height := r.randf_range(6.0, 12.0)
+		var hr := r.randf()
+		if hr < 0.35: height = r.randf_range(13.0, 21.0)
+		elif hr < 0.45: height = r.randf_range(22.0, 27.0)
+		height = snappedf(height, 3.0)
+		var fm = facade_mats[r.randi() % facade_mats.size()]
+		_box(cc + Vector3(0, 0.2 + height * 0.5, 0), Vector3(sz.x, height, sz.y), fm, true)
+		var rm = roof_mats[r.randi() % roof_mats.size()]
+		var top := 0.2 + height
+		# parapet lip + recessed roof
+		_box(cc + Vector3(0, top + 0.15, 0), Vector3(sz.x + 0.3, 0.3, sz.y + 0.3), Tex.mat_col(Color(0.50, 0.48, 0.46)), false)
+		_box(cc + Vector3(0, top + 0.2, 0), Vector3(sz.x - 0.6, 0.3, sz.y - 0.6), rm, false)
+		# roof clutter: AC units, vents, water tanks
+		for k in r.randi_range(1, 3):
+			var off := Vector3(r.randf_range(-0.3, 0.3) * sz.x, 0, r.randf_range(-0.3, 0.3) * sz.y)
+			var kind := r.randf()
+			if kind < 0.6:
+				_box(cc + off + Vector3(0, top + 0.75, 0), Vector3(1.4, 0.8, 1.0), Tex.mat_col(Color(0.80, 0.80, 0.82)), false)
+				_box(cc + off + Vector3(0, top + 1.17, 0), Vector3(0.9, 0.05, 0.6), Tex.mat_col(Color(0.25, 0.25, 0.27)), false)
+			elif kind < 0.85:
+				var mi := MeshInstance3D.new()
+				var cm := CylinderMesh.new()
+				cm.top_radius = 1.0; cm.bottom_radius = 1.0; cm.height = 2.0
+				mi.mesh = cm
+				mi.material_override = Tex.mat_col(Color(0.55, 0.38, 0.25))
+				mi.position = cc + off + Vector3(0, top + 1.35, 0)
+				add_child(mi)
+			else:
+				_box(cc + off + Vector3(0, top + 0.9, 0), Vector3(2.0, 1.2, 2.0), Tex.mat_col(Color(0.62, 0.60, 0.56)), false)
+
+func _park(c: Vector3, lot: float) -> void:
+	_box(c + Vector3(0, 0.22, 0), Vector3(lot, 0.05, lot), Tex.mat_tex(Tex.grass(), 6.0), false)
+	# footpath cross
+	_box(c + Vector3(0, 0.25, 0), Vector3(lot, 0.03, 1.6), Tex.mat_col(Color(0.70, 0.62, 0.48)), false)
+	_box(c + Vector3(0, 0.25, 0), Vector3(1.6, 0.03, lot), Tex.mat_col(Color(0.70, 0.62, 0.48)), false)
+	var leaf := [Tex.mat_col(Color(0.18, 0.42, 0.15)), Tex.mat_col(Color(0.25, 0.50, 0.18)), Tex.mat_col(Color(0.14, 0.35, 0.14))]
+	for k in 9:
+		var p := c + Vector3(r.randf_range(-0.42, 0.42) * lot, 0, r.randf_range(-0.42, 0.42) * lot)
+		if abs(p.x - c.x) < 1.6 or abs(p.z - c.z) < 1.6: continue
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		var rad := r.randf_range(1.3, 2.2)
+		sm.radius = rad; sm.height = rad * 1.6
+		mi.mesh = sm
+		mi.material_override = leaf[k % 3]
+		mi.position = p + Vector3(0, 2.5, 0)
+		add_child(mi)
+	# fountain
+	var f := MeshInstance3D.new()
+	var cm := CylinderMesh.new(); cm.top_radius = 1.4; cm.bottom_radius = 1.5; cm.height = 0.5
+	f.mesh = cm; f.material_override = Tex.mat_col(Color(0.3, 0.55, 0.85)); f.position = c + Vector3(0, 0.45, 0)
+	add_child(f)
+
+func _parking(c: Vector3, lot: float) -> void:
+	_box(c + Vector3(0, 0.21, 0), Vector3(lot, 0.03, lot), Tex.mat_tex(Tex.asphalt(), 8.0, Color(1.05, 1.05, 1.1)), false)
+	var white := Tex.mat_col(Color(0.92, 0.92, 0.88))
+	for k in 5:
+		var x := c.x - lot * 0.5 + 1.3 + k * 2.6
+		_box(Vector3(x - 1.3, 0.24, c.z - lot * 0.5 + 2.5), Vector3(0.12, 0.02, 4.5), white, false)
+		if r.randf() < 0.55:
+			parked_spots.append([Vector3(x, 0.2, c.z - lot * 0.5 + 2.6), 0.0])
+		_box(Vector3(x - 1.3, 0.24, c.z + lot * 0.5 - 2.5), Vector3(0.12, 0.02, 4.5), white, false)
+		if r.randf() < 0.55:
+			parked_spots.append([Vector3(x, 0.2, c.z + lot * 0.5 - 2.6), PI])
+
+func _markings() -> void:
+	var dash := BoxMesh.new(); dash.size = Vector3(0.22, 0.02, 2.2)
+	var stripe := BoxMesh.new(); stripe.size = Vector3(0.55, 0.02, 2.0)
+	var gap := Game.ROAD_HALF + 2.0
+	for k in Game.NB + 1:
+		for s in Game.NB:
+			var a := s * P + gap
+			var b := (s + 1) * P - gap
+			var t := a + 1.0
+			while t < b:
+				# road along X at z = k*P (dashes rotated 90deg)
+				dash_xf.append(Transform3D(Basis(Vector3.UP, PI / 2), Vector3(t, 0.01, k * P)))
+				dash_xf.append(Transform3D(Basis(), Vector3(k * P, 0.01, t)))
+				t += 4.5
+	# zebra crossings at every intersection approach
+	for i in Game.NB + 1:
+		for j in Game.NB + 1:
+			var n := Vector3(i * P, 0.01, j * P)
+			for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				if not Game.in_grid(Vector2i(i, j) + d): continue
+				var dir := Vector3(d.x, 0, d.y)
+				var rt := Game.right_of(d)
+				var w := -Game.ROAD_HALF + 0.8
+				while w < Game.ROAD_HALF - 0.5:
+					var bas := Basis() if d.x == 0 else Basis(Vector3.UP, PI / 2)
+					stripe_xf.append(Transform3D(bas, n + dir * (Game.ROAD_HALF + 0.9) + rt * w))
+					w += 1.3
+	_multimesh(dash, dash_xf, Tex.mat_col(Color(0.95, 0.85, 0.35)))
+	_multimesh(stripe, stripe_xf, Tex.mat_col(Color(0.92, 0.92, 0.90)))
+
+func _multimesh(mesh: Mesh, xfs: Array, mat: Material) -> void:
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = mesh
+	mm.instance_count = xfs.size()
+	for i in xfs.size():
+		mm.set_instance_transform(i, xfs[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = mm
+	mmi.material_override = mat
+	add_child(mmi)

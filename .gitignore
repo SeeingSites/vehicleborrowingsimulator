@@ -1,0 +1,16 @@
+# Godot
+.godot/
+*.import.bak
+export_credentials.cfg
+# Local engine download (CI installs its own pinned copy)
+tools/*
+!tools/.gdignore
+# Build outputs
+web_build/*
+!web_build/.gdignore
+*.pck
+*.zip
+*.tpz
+# OS / editor
+.DS_Store
+*.swp
