@@ -1,0 +1,4 @@
+# v4 regression run (crime systems active: gangs, phones, facilities), 300 s, signals on
+c34 s1: {"car_contacts_per_min":2.0,"cars":34,"cars_ever_stuck_20s":0,"gridlock_pct":0.0,"intersections_per_car_min":8.15,"jam_rate_pct":1.41,"mean_speed_kmh":12.1,"peak_jam_pct":0.0,"wrecks":0}
+c100 s1: {"car_contacts_per_min":8.0,"cars":100,"cars_ever_stuck_20s":1,"gridlock_pct":0.02,"intersections_per_car_min":7.39,"jam_rate_pct":1.53,"mean_speed_kmh":11.0,"peak_jam_pct":1.0,"wrecks":0}
+c100 s2: {"car_contacts_per_min":18.0,"cars":100,"cars_ever_stuck_20s":2,"gridlock_pct":0.04,"intersections_per_car_min":7.08,"jam_rate_pct":1.69,"mean_speed_kmh":10.6,"peak_jam_pct":1.0,"wrecks":0}

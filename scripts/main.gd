@@ -15,15 +15,13 @@ var skids: MultiMeshInstance3D
 var skid_i := 0
 var n_traffic := 34
 var n_peds := 90
-var bust_t := 0.0
-var police_cd := 0.0
 var shake := 0.0
 var weapons
+var crime
 var fps_t := 0.0
 var engine_snd: AudioStreamPlayer
 var skid_snd: AudioStreamPlayer
 var horn_snd: AudioStreamPlayer
-const RESPAWN := Vector3(1 * 28.0 - 6.25, 0.2, 1 * 28.0 - 10.0)
 
 func _ready() -> void:
 	Game.main = self
@@ -71,6 +69,9 @@ func _ready() -> void:
 	weapons = load("res://scripts/weapons.gd").new()
 	add_child(weapons)
 	weapons.setup(self)
+	crime = load("res://scripts/crime.gd").new()
+	add_child(crime)
+	crime.setup(self)
 	hud = load("res://scripts/hud.gd").new()
 	add_child(hud)
 	touch = load("res://scripts/touch.gd").new()
@@ -82,6 +83,8 @@ func _ready() -> void:
 	horn_snd = _loop_player("horn", -6.0)
 	if Game.sim_seconds > 0.0:
 		load("res://scripts/sim.gd").new().run(self)
+	if Game.test:
+		load("res://scripts/tests.gd").new().run(self)
 	if Game.shot != "":
 		load("res://scripts/shots.gd").new().run(self, Game.shot)
 
@@ -115,10 +118,10 @@ func spawn_traffic_random() -> Car:
 			return spawn_traffic_at(n, d, Game.rng.randf_range(0.3, 0.7))
 	return null
 
-func spawn_ped(b: Vector2i) -> Ped:
+func spawn_ped(b: Vector2i, role := "civ", gang := -1) -> Ped:
 	var p := Ped.new()
 	add_child(p)
-	p.setup(b)
+	p.setup(b, role, gang)
 	return p
 
 func spawn_police_near(pos: Vector3, min_d := 45.0, max_d := 80.0) -> Car:
@@ -284,8 +287,9 @@ func explosion(pos: Vector3, src: Node) -> void:
 	if src == player_car or (player.visible and player.global_position.distance_to(pos) < 6.5):
 		wasted()
 
+var god := false   # tests only
 func wasted() -> void:
-	if player.dying: return
+	if player.dying or god: return
 	player.dying = true
 	player.health = 0.0
 	if player_car:
@@ -300,14 +304,20 @@ func wasted() -> void:
 	await get_tree().create_timer(4.0, true, false, true).timeout
 	Engine.time_scale = 1.0
 	hud.show_wasted(false)
+	Game.set_wanted(0)
+	respawn_at(crime.hospital_pos)
+	crime.after_wasted()
+
+func respawn_at(pos: Vector3) -> void:
 	player.rotation = Vector3.ZERO
-	player.global_position = RESPAWN
+	player.global_position = Vector3(pos.x, 0.2, pos.z)
 	player.visible = true
 	player.collision_layer = 4
 	player.collision_mask = 1 | 2
 	player.health = 100.0
 	player.dying = false
-	Game.set_wanted(0)
+	player.busy = false
+	cam.global_position = Vector3(pos.x, cam_h, pos.z)
 
 func _physics_process(dt: float) -> void:
 	if Input.is_action_just_pressed("enter_exit") and not player.dying:
@@ -315,10 +325,11 @@ func _physics_process(dt: float) -> void:
 	if city.lamp_mats.size() > 0: city.update_lamps()
 	if player_car: player.global_position = player_car.global_position + Vector3(0, 0.2, 0)
 	_update_audio()
-	_police_logic(dt)
 	_recycle()
 
 func toggle_car() -> void:
+	if not crime.breaking.is_empty(): return
+	if crime.interact(): return
 	if player_car:
 		var c := player_car
 		c.ctrl = Car.Ctrl.NONE
@@ -336,40 +347,29 @@ func toggle_car() -> void:
 	if best == null: return
 	enter_car(best)
 
-func enter_car(c: Car) -> void:
+func enter_car(c: Car, forced := false) -> void:
 	if c.dead: return
+	var owned: bool = c.get_meta("owned", false)
 	if c.ctrl == Car.Ctrl.TRAFFIC or c.ctrl == Car.Ctrl.POLICE:
-		# carjack: throw the driver out
-		var p := spawn_ped(Vector2i(clampi(int(c.global_position.x / Game.P), 0, Game.NB - 1), clampi(int(c.global_position.z / Game.P), 0, Game.NB - 1)))
-		p.global_position = c.global_position + c.global_transform.basis.x * 2.2 + Vector3(0, 0.2, 0)
-		if c.is_police: Game.add_wanted(2)
+		# carjack: pull the driver out (a cop driver gets out on foot and fights back)
+		var cop: bool = c.is_police or c.has_meta("swat")
+		var p := spawn_ped(Game.block_of(c.global_position), "cop" if cop else "civ")
+		p.global_position = c.global_position + c.global_transform.basis.x * 2.2 + Vector3(0, 0.15, 0)
+		if not cop:
+			p.stun(1.2)
+		c.set_meta("owned", true)
+		if Game.shot == "" or forced: crime.car_stolen(c, "jack", p)
+	elif not owned and not forced and Game.shot == "":
+		crime.start_break_in(c)
+		return
+	elif not owned and forced:
+		crime.car_stolen(c, "parked")
+	c.set_meta("owned", true)
 	c.ctrl = Car.Ctrl.PLAYER
 	player_car = c
 	player.visible = false
 	player.collision_layer = 0
 	player.collision_mask = 0
-
-func _police_logic(dt: float) -> void:
-	var cops := []
-	for c in get_tree().get_nodes_in_group("cars"):
-		if c.ctrl == Car.Ctrl.POLICE and not c.dead: cops.append(c)
-	police_cd -= dt
-	if Game.wanted > 0 and cops.size() < mini(Game.wanted, 4) and police_cd <= 0.0:
-		police_cd = 3.0
-		spawn_police_near(player_target().global_position)
-	# busted: police car next to you while you're on foot or stopped
-	var near := false
-	for c in cops:
-		var d: float = c.global_position.distance_to(player_target().global_position)
-		var slow: bool = player_car == null or player_car.speed() < 2.0
-		if d < (5.0 if player_car == null else 5.5) and slow: near = true
-	bust_t = bust_t + dt if near else 0.0
-	if bust_t > 1.0 and Game.wanted > 0 and not player.dying:
-		bust_t = 0.0
-		Game.message.emit("BUSTED!", Color(0.4, 0.6, 1.0))
-		Game.add_cash(-mini(Game.cash, 100))
-		Game.set_wanted(0)
-		if player_car: toggle_car()
 
 func _recycle() -> void:
 	for w in get_tree().get_nodes_in_group("wrecks"):
@@ -386,7 +386,7 @@ func _recycle() -> void:
 	for p in get_tree().get_nodes_in_group("dead_peds"):
 		if p.dead_t > 20.0:
 			p.queue_free()
-			spawn_ped(Vector2i(Game.rng.randi() % Game.NB, Game.rng.randi() % Game.NB))
+			if p.role == "civ": spawn_ped(Vector2i(Game.rng.randi() % Game.NB, Game.rng.randi() % Game.NB))
 
 func _process(dt: float) -> void:
 	if OS.has_feature("web") or OS.get_environment("FPSLOG") != "":

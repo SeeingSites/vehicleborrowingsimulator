@@ -72,13 +72,24 @@ func _draw() -> void:
 	draw_arc(b, RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	draw_circle(b + stick_pos, 48, Color(1, 1, 1, 0.45))
 	var font := ThemeDB.fallback_font
-	for pair in [[_enter_btn(), "ENTER", Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0], [_fire_btn(), "FIRE", Color(0.95, 0.15, 0.15, 0.5), 70.0], [_wpn_btn(), "WPN", Color(0.9, 0.8, 0.2, 0.45), 40.0]]:
+	for pair in [[_enter_btn(), _enter_label(), Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0], [_fire_btn(), "FIRE", Color(0.95, 0.15, 0.15, 0.5), 70.0], [_wpn_btn(), "WPN", Color(0.9, 0.8, 0.2, 0.45), 40.0]]:
 		draw_circle(pair[0], pair[3], pair[2])
 		draw_arc(pair[0], pair[3], 0, TAU, 48, Color(1, 1, 1, 0.6), 3.0)
-		draw_string(font, pair[0] + Vector2(-38, 8), pair[1], HORIZONTAL_ALIGNMENT_CENTER, 76, 20 if pair[3] < 60 else 24, Color.WHITE)
+		var fs := 20 if pair[3] < 60 else (24 if String(pair[1]).length() <= 5 else 21)
+		draw_string(font, pair[0] + Vector2(-55, 8), pair[1], HORIZONTAL_ALIGNMENT_CENTER, 110, fs, Color.WHITE)
 
+func _enter_label() -> String:
+	var m = Game.main
+	if m and m.crime: return m.crime.context_label()
+	return "ENTER"
+
+var _last_label := ""
 func _process(_dt: float) -> void:
 	if not visible: return
+	var lab := _enter_label()
+	if lab != _last_label:
+		_last_label = lab
+		queue_redraw()
 	var vs := get_viewport_rect().size
 	if size != vs:
 		position = Vector2.ZERO

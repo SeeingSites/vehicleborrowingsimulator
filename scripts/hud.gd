@@ -15,6 +15,11 @@ var weapon_l: Label
 var wasted_rect: ColorRect
 var wasted_l: Label
 var msg_t := 0.0
+var mult_l: Label
+var obj_l: Label
+var zone_l: Label
+var evade_l: Label
+var respect: Control
 var shown_cash := 0.0
 
 func _ready() -> void:
@@ -31,7 +36,7 @@ func _ready() -> void:
 	msg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	msg_l.size = Vector2(800, 90)
 	hint_l = _label(16, Color(0.9, 0.9, 0.9))
-	hint_l.text = "WASD/arrows move  ·  E enter/exit car  ·  SPACE handbrake  ·  H horn  ·  CTRL/F/click fire  ·  Q weapon"
+	hint_l.text = "WASD move · E steal/enter/exit car, answer phones · SPACE handbrake · H horn · CTRL/F/click fire or punch · Q weapon"
 	Game.message.connect(_on_msg)
 	panel = Panel2.new()
 	add_child(panel)
@@ -56,10 +61,30 @@ func _ready() -> void:
 	wasted_l.size = Vector2(900, 160)
 	wasted_l.add_theme_constant_override("outline_size", 24)
 	wasted_l.visible = false
+	mult_l = _label(30, Color(1.0, 0.6, 0.15))
+	mult_l.size = Vector2(80, 40)
+	obj_l = _label(24, Color(1.0, 0.95, 0.5))
+	obj_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	obj_l.size = Vector2(700, 70)
+	zone_l = _label(22, Color(0.9, 0.95, 1.0))
+	zone_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	zone_l.size = Vector2(700, 34)
+	evade_l = _label(16, Color(0.7, 1.0, 0.7))
+	evade_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	evade_l.size = Vector2(300, 24)
+	respect = Respect.new()
+	add_child(respect)
 
 func show_wasted(on: bool) -> void:
+	show_overlay(on, "WASTED", Color(0.95, 0.1, 0.1))
+
+func show_overlay(on: bool, text := "", col := Color.WHITE) -> void:
 	wasted_rect.visible = on
 	wasted_l.visible = on
+	if on:
+		wasted_l.text = text
+		wasted_l.add_theme_color_override("font_color", col)
+		wasted_rect.color = Color(col.r * 0.5, col.g * 0.5, col.b * 0.5, 0.35)
 
 func _label(sz: int, col: Color) -> Label:
 	var l := Label.new()
@@ -82,7 +107,7 @@ func _process(dt: float) -> void:
 	cash_l.position = Vector2(vs.x - 420, 12)
 	speed_l.position = Vector2(vs.x - 340, vs.y - 70)
 	msg_l.position = Vector2(vs.x * 0.5 - 400, vs.y * 0.5 - 170)
-	stars.position = Vector2(vs.x * 0.5, 44) if vs.x >= 1000 else Vector2(vs.x * 0.5, 262)
+	stars.position = Vector2(vs.x * 0.5, 44) if vs.x >= 1000 else Vector2(vs.x * 0.5, 284)
 	stars.queue_redraw()
 	bars.position = Vector2(vs.x - 236, 74)
 	bars.queue_redraw()
@@ -102,7 +127,23 @@ func _process(dt: float) -> void:
 		weapon_l.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 	wasted_rect.size = vs
 	wasted_l.position = Vector2(vs.x * 0.5 - 450, vs.y * 0.5 - 90)
-	hint_l.position = Vector2(vs.x * 0.5 - 330, vs.y - 34)
+	hint_l.position = Vector2(vs.x * 0.5 - 420, vs.y - 34)
+	var cr = Game.main.crime if Game.main else null
+	mult_l.visible = Game.mult > 1
+	mult_l.text = "x%d" % Game.mult
+	mult_l.position = Vector2(vs.x - 380 if vs.x >= 1000 else vs.x - 400, 18)
+	var star_y: float = stars.position.y
+	obj_l.text = cr.objective_text() if cr else ""
+	obj_l.position = Vector2(vs.x * 0.5 - 350, star_y + 58)
+	evade_l.position = Vector2(vs.x * 0.5 - 150, star_y + 26)
+	evade_l.visible = Game.wanted > 0
+	evade_l.text = "SEEN" if Game.cop_sees else "EVADING  %d" % ceili(Game.EVADE - Game.wanted_timer)
+	evade_l.add_theme_color_override("font_color", Color(1, 0.4, 0.35) if Game.cop_sees else Color(0.7, 1.0, 0.7))
+	zone_l.visible = cr != null and cr.zone_t > 0.0
+	if zone_l.visible: zone_l.text = cr.zone_msg
+	zone_l.position = Vector2(vs.x * 0.5 - 350, vs.y - (300 if touch_ui != null and touch_ui.visible and vs.x < 1000 else 96))
+	respect.position = Vector2(vs.x - 290, 160)
+	respect.queue_redraw()
 	var car = Game.main.player_car if Game.main else null
 	speed_l.text = ""
 	msg_t -= dt
@@ -140,7 +181,7 @@ class Bars extends Control:
 
 class Panel2 extends Control:
 	func _draw() -> void:
-		var h := 160.0
+		var h := 236.0
 		draw_rect(Rect2(Vector2.ZERO, Vector2(294, h)), Color(0, 0, 0, 0.38))
 		draw_rect(Rect2(Vector2.ZERO, Vector2(294, h)), Color(1, 1, 1, 0.15), false, 2.0)
 
@@ -200,7 +241,22 @@ class Minimap extends Control:
 			var a := k * Game.P
 			draw_line(to_map.call(Vector3(a, 0, 0)), to_map.call(Vector3(a, 0, span)), Color(0.85, 0.75, 0.3, 0.6), 1.0)
 			draw_line(to_map.call(Vector3(0, 0, a)), to_map.call(Vector3(span, 0, a)), Color(0.85, 0.75, 0.3, 0.6), 1.0)
+		# gang turf tint
+		for bx in Game.NB:
+			for by in Game.NB:
+				var g := Game.gang_at_block(Vector2i(bx, by))
+				if g < 0: continue
+				var x0 := bx * Game.P + Game.ROAD_HALF; var x1 := (bx + 1) * Game.P - Game.ROAD_HALF
+				var z0 := by * Game.P + Game.ROAD_HALF; var z1 := (by + 1) * Game.P - Game.ROAD_HALF
+				var poly := PackedVector2Array([to_map.call(Vector3(x0, 0, z0)), to_map.call(Vector3(x1, 0, z0)), to_map.call(Vector3(x1, 0, z1)), to_map.call(Vector3(x0, 0, z1))])
+				draw_colored_polygon(poly, Color(Game.GANGS[g]["col"], 0.28))
 		var flash := fmod(Time.get_ticks_msec() / 1000.0, 0.5) < 0.25
+		for p in m.get_tree().get_nodes_in_group("armed"):
+			if not p.alive: continue
+			var q: Vector2 = to_map.call(p.global_position)
+			if q.x < 0 or q.y < 0 or q.x > SZ or q.y > SZ: continue
+			var pc: Color = Game.GANGS[p.gang]["col"] if p.role == "gang" else Color(0.3, 0.5, 1.0)
+			draw_circle(q, 3.0, pc)
 		for c in m.get_tree().get_nodes_in_group("cars"):
 			if c == m.player_car: continue
 			var p: Vector2 = to_map.call(c.global_position)
@@ -217,6 +273,21 @@ class Minimap extends Control:
 				var col: Color = m.weapons.DEFS[pk[1]]["color"]
 				draw_rect(Rect2(p - Vector2(4, 4), Vector2(8, 8)), col)
 				draw_rect(Rect2(p - Vector2(4, 4), Vector2(8, 8)), Color.BLACK, false, 1.0)
+		if m.crime:
+			var f := ThemeDB.fallback_font
+			for b in m.crime.blips():
+				var q: Vector2 = to_map.call(b[0])
+				var inside := q.x > 8 and q.y > 8 and q.x < SZ - 8 and q.y < SZ - 8
+				if not inside:
+					if not b[3]: continue
+					q = ctr + (q - ctr).normalized() * (SZ * 0.5 - 12)
+					q = q.clamp(Vector2(10, 10), Vector2(SZ - 10, SZ - 10))
+				var big: bool = b[3]
+				var r := 9.0 if big else 7.5
+				if big and flash: r = 11.0
+				draw_circle(q, r, Color(0, 0, 0, 0.75))
+				draw_arc(q, r, 0, TAU, 16, b[1], 2.0)
+				draw_string(f, q + Vector2(-5, 5), b[2], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, b[1])
 		# player arrow (always pointing up)
 		var pts := PackedVector2Array([ctr + Vector2(0, -11), ctr + Vector2(8, 8), ctr + Vector2(0, 4), ctr + Vector2(-8, 8)])
 		draw_colored_polygon(pts, Color(0.2, 1.0, 0.35))
@@ -228,3 +299,22 @@ class Minimap extends Control:
 		draw_circle(npos, 10, Color(0, 0, 0, 0.6))
 		draw_string(ThemeDB.fallback_font, npos + Vector2(-6, 6), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color.WHITE)
 		draw_rect(Rect2(Vector2.ZERO, size), Color(1, 1, 1, 0.6), false, 3.0)
+
+## Gang respect: three bars, centre = 0, left red (hated) / right gang colour (respected).
+class Respect extends Control:
+	func _draw() -> void:
+		var f := ThemeDB.fallback_font
+		for g in 3:
+			var y := g * 23.0
+			var r: int = Game.respect[g]
+			var col: Color = Game.GANGS[g]["col"]
+			draw_string(f, Vector2(0, y + 14), String(Game.GANGS[g]["short"]), HORIZONTAL_ALIGNMENT_LEFT, 90, 15, col)
+			var x0 := 96.0; var w := 180.0
+			draw_rect(Rect2(Vector2(x0, y + 2), Vector2(w, 14)), Color(0, 0, 0, 0.6))
+			var mid := x0 + w * 0.5
+			var len := w * 0.5 * absf(r) / 100.0
+			if r >= 0: draw_rect(Rect2(Vector2(mid, y + 4), Vector2(len, 10)), col)
+			else: draw_rect(Rect2(Vector2(mid - len, y + 4), Vector2(len, 10)), Color(0.9, 0.15, 0.15))
+			draw_line(Vector2(mid, y), Vector2(mid, y + 18), Color(1, 1, 1, 0.7), 1.5)
+			var ux := mid + w * 0.5 * 20.0 / 100.0
+			draw_line(Vector2(ux, y + 2), Vector2(ux, y + 16), Color(1, 1, 0.4, 0.6), 1.0)

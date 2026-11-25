@@ -248,8 +248,9 @@ func _drive(dt: float) -> void:
 	if impact > 7.0 and hit_cd <= 0.0:
 		hit_cd = 0.4
 		var dmg := (impact - 7.0) * 5.0
-		take_damage(dmg / mass)
-		if other is Car: other.take_damage(dmg * 0.8 * mass / other.mass)
+		# one crash can wreck a car but never makes it explode outright
+		take_damage(minf(dmg / mass, 60.0))
+		if other is Car: other.take_damage(minf(dmg * 0.8 * mass / other.mass, 60.0))
 		if Game.main: Game.main.play_at("thud", global_position, clampf(-14.0 + impact, -14.0, 4.0))
 	global_position.y = 0.0
 	rotation.x = 0.0; rotation.z = 0.0
@@ -271,6 +272,28 @@ func take_damage(d: float) -> void:
 		ignite(Game.rng.randf_range(3.0, 4.5))
 	if health < -40.0:
 		explode()
+
+## Respray: full repair, fire out, new paint tint.
+func respray(tint: Color) -> void:
+	if dead: return
+	health = 100.0
+	burn_t = -1.0
+	dmg_overlay.albedo_color.a = 0.0
+	if smoke: smoke.queue_free(); smoke = null
+	if fire: fire.queue_free(); fire = null
+	if fire_light: fire_light.queue_free(); fire_light = null
+	_tint(model, tint)
+
+func _tint(n: Node, tint: Color) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var base := mi.mesh.surface_get_material(i)
+			if base is StandardMaterial3D:
+				var mat := (base as StandardMaterial3D).duplicate() as StandardMaterial3D
+				mat.albedo_color = tint
+				mi.set_surface_override_material(i, mat)
+	for ch in n.get_children(): _tint(ch, tint)
 
 func _ensure_smoke() -> void:
 	if smoke: return
@@ -343,14 +366,13 @@ func _hit_peds() -> void:
 		var d: Vector3 = p.global_position - pos
 		d.y = 0
 		if absf(d.dot(fwd)) < 2.5 and absf(d.dot(rt)) < 1.3:
-			p.kill(velocity)
+			p.kill(velocity, ctrl == Ctrl.PLAYER)
 			if Game.main: Game.main.play_at("splat", p.global_position, 0.0)
 			if ctrl == Ctrl.PLAYER:
-				Game.add_cash(10)
 				Game.add_wanted(1)
-				Game.message.emit("+$10", Color(1, 0.9, 0.2))
 	var pl = Game.main.player if Game.main else null
-	if pl and pl.visible and not pl.dying and speed() > 6.0:
+	# police only run you down deliberately from 4 stars; otherwise they brake to arrest
+	if pl and pl.visible and not pl.dying and speed() > 6.0 and (ctrl != Ctrl.POLICE or Game.wanted >= 4):
 		var d: Vector3 = pl.global_position - pos
 		d.y = 0
 		if absf(d.dot(fwd)) < 2.6 and absf(d.dot(rt)) < 1.4:
@@ -555,7 +577,7 @@ func _ai_police(dt: float) -> void:
 	var diff := _steer_to(target)
 	hb = absf(diff) > 1.1 and speed() > 12.0
 	var on_foot: bool = pl == Game.main.player
-	if on_foot and dist < 9.0:
+	if on_foot and dist < (14.0 if Game.wanted < 4 else 6.0):
 		throttle = -1.0 if speed() > 2.0 else 0.0
 	else:
 		throttle = 1.0 if absf(diff) < 1.3 else 0.5

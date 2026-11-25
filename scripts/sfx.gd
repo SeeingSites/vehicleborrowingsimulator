@@ -33,6 +33,13 @@ static func get_stream(name: String) -> AudioStreamWAV:
 		"pistol": s = _wav(_burst(0.22, 0.6, 22.0, 140.0, 0.6, 21), false)
 		"smg": s = _wav(_burst(0.12, 0.7, 35.0, 180.0, 0.4, 22), false)
 		"pickup": s = _make_pickup()
+		"shotgun": s = _wav(_burst(0.45, 0.35, 9.0, 90.0, 0.9, 23), false)
+		"punch": s = _wav(_burst(0.12, 0.1, 30.0, 110.0, 0.9, 24), false)
+		"alarm": s = _make_tones([[950.0, 0.18], [700.0, 0.18]], 5, true, 0.35)
+		"ring": s = _make_tones([[1200.0, 0.05], [900.0, 0.05]], 8, false, 0.3)
+		"cash": s = _make_tones([[1318.0, 0.07], [1760.0, 0.16]], 1, false, 0.4)
+		"spray": s = _wav(_burst(1.2, 0.9, 1.5, 0.0, 0.0, 25), false)
+		"crush": s = _wav(_burst(1.0, 0.05, 3.0, 55.0, 1.0, 26), false)
 		_: s = _make_explosion()
 	_cache[name] = s
 	return s
@@ -114,4 +121,17 @@ static func _make_pickup() -> AudioStreamWAV:
 		var t := float(i) / RATE
 		var f := 660.0 if t < 0.08 else (880.0 if t < 0.16 else 1320.0)
 		out[i] = sin(TAU * f * t) * 0.4 * exp(-t * 6.0)
+	return _wav(out, false)
+
+## Sequence of square-ish tones repeated `reps` times (alarm, phone ring, cash chime).
+static func _make_tones(seq: Array, reps: int, square: bool, amp: float) -> AudioStreamWAV:
+	var out := PackedFloat32Array()
+	for r in reps:
+		for st in seq:
+			var n := int(RATE * float(st[1]))
+			for i in n:
+				var t := float(i) / RATE
+				var v := sin(TAU * float(st[0]) * t)
+				if square: v = signf(v) * 0.6
+				out.append(v * amp * minf(1.0, (n - i) / 200.0) * minf(1.0, i / 100.0))
 	return _wav(out, false)

@@ -4,7 +4,10 @@ extends Node3D
 const DEFS := {
 	"pistol": {"rate": 0.32, "dmg": 26.0, "spread": 1.5, "range": 45.0, "pickup": 30, "color": Color(1.0, 0.85, 0.2), "snd": "pistol"},
 	"smg":    {"rate": 0.085, "dmg": 11.0, "spread": 5.0, "range": 38.0, "pickup": 120, "color": Color(0.3, 0.7, 1.0), "snd": "smg"},
+	"shotgun": {"rate": 0.8, "dmg": 18.0, "spread": 13.0, "range": 24.0, "pickup": 16, "color": Color(1.0, 0.45, 0.2), "snd": "shotgun", "pellets": 6},
 }
+const ORDER := ["pistol", "smg", "shotgun"]
+var punch_cd := 0.0
 var ammo := {}           # weapon -> rounds
 var current := ""
 var cd := 0.0
@@ -21,7 +24,7 @@ func setup(main_) -> void:
 		var b := Vector2i(r.randi() % Game.NB, r.randi() % Game.NB)
 		var c := r.randi() % 4
 		var pos: Vector3 = Ped._corner_pos(b, c)
-		add_pickup(pos, "pistol" if i % 2 == 0 else "smg")
+		add_pickup(pos, ["pistol", "smg", "pistol", "shotgun"][i % 4])
 
 func add_pickup(pos: Vector3, w: String) -> Node3D:
 	var n := Node3D.new()
@@ -31,7 +34,7 @@ func add_pickup(pos: Vector3, w: String) -> Node3D:
 	mi.material_override = Tex.mat_col(DEFS[w]["color"], true)
 	n.add_child(mi)
 	var inner := MeshInstance3D.new()
-	var im := BoxMesh.new(); im.size = Vector3(0.75, 0.2, 0.25) if w == "pistol" else Vector3(1.0, 0.2, 0.3)
+	var im := BoxMesh.new(); im.size = Vector3(0.75, 0.2, 0.25) if w == "pistol" else Vector3(1.0, 0.2, 0.3) if w == "smg" else Vector3(1.05, 0.22, 0.22)
 	inner.mesh = im
 	inner.material_override = Tex.mat_col(Color(0.08, 0.08, 0.1))
 	inner.position = Vector3(0, 0.32, 0)
@@ -46,7 +49,7 @@ func has_any() -> bool:
 
 func cycle() -> void:
 	var owned := []
-	for w in ["pistol", "smg"]:
+	for w in ORDER:
 		if ammo.get(w, 0) > 0: owned.append(w)
 	if owned.is_empty(): current = ""; return
 	var i := owned.find(current)
@@ -68,15 +71,49 @@ func _physics_process(dt: float) -> void:
 		if who.global_position.distance_to(n.global_position) < 2.4 and not m.player.dying:
 			var w: String = p[1]
 			ammo[w] = ammo.get(w, 0) + DEFS[w]["pickup"]
-			if current == "" or ammo.get(current, 0) <= 0 or w == "smg": current = w
+			if current == "" or ammo.get(current, 0) <= 0 or w != "pistol": current = w
 			n.visible = false
 			p[2] = 30.0
 			Game.message.emit(w.to_upper() + "!", DEFS[w]["color"])
 			m.play_at("pickup", n.global_position, -2.0)
 	if Input.is_action_just_pressed("weapon_next"): cycle()
+	punch_cd -= dt
 	var firing := Input.is_action_pressed("fire") or auto_fire
 	if firing and cd <= 0.0 and has_any() and not m.player.dying:
 		shoot()
+	elif firing and not has_any() and m.player_car == null and punch_cd <= 0.0 and not m.player.dying and m.player.visible:
+		punch()
+
+func give(w: String, n: int) -> void:
+	ammo[w] = ammo.get(w, 0) + n
+	current = w
+
+func clear() -> void:
+	ammo = {}
+	current = ""
+
+## Fists: knock a pedestrian down and take their cash (mugging); hits on a downed ped hurt.
+func punch() -> void:
+	punch_cd = 0.45
+	var p: Node3D = m.player
+	var f := Vector3(-sin(p.rotation.y), 0, -cos(p.rotation.y))
+	var best: Ped = null; var bd := 2.0
+	for q in get_tree().get_nodes_in_group("peds"):
+		if not q.alive: continue
+		var rel: Vector3 = q.global_position - p.global_position
+		rel.y = 0
+		if rel.length() < bd and rel.normalized().dot(f) > 0.3:
+			bd = rel.length(); best = q
+	m.play_at("punch", p.global_position, -4.0)
+	if m.has_method("punch_anim"): m.punch_anim()
+	if best == null: return
+	if best.role == "civ" and not best.mugged and best.stun_t <= 0.0:
+		best.mugged = true
+		best.stun(2.5)
+		if m.crime: m.crime.mugged(best)
+	else:
+		best.hit(14.0, f, true)
+		if best.role == "cop" or best.role == "swat": Game.add_wanted(1)
 
 func muzzle() -> Array:
 	if m.player_car:
@@ -91,8 +128,13 @@ func shoot() -> void:
 	cd = d["rate"]
 	ammo[current] -= 1
 	var mz := muzzle()
-	var origin: Vector3 = mz[0]
-	var dir: Vector3 = (mz[1] as Vector3).rotated(Vector3.UP, deg_to_rad(randf_range(-d["spread"], d["spread"])))
+	for k in d.get("pellets", 1):
+		_pellet(mz[0], mz[1], d)
+	m.play_at(d["snd"], mz[0], -3.0)
+	fired.emit()
+
+func _pellet(origin: Vector3, aim: Vector3, d: Dictionary) -> void:
+	var dir: Vector3 = aim.rotated(Vector3.UP, deg_to_rad(randf_range(-d["spread"], d["spread"])))
 	var rng: float = d["range"]
 	var end := origin + dir * rng
 	var q := PhysicsRayQueryParameters3D.create(origin, end, 1)
@@ -110,27 +152,28 @@ func shoot() -> void:
 		if tt >= 0.0: best = c; bt = tt
 	end = origin + dir * bt
 	if best is Ped:
-		best.kill(dir * 6.0)
-		m.play_at("splat", best.global_position, -2.0)
-		Game.add_cash(10)
-		_crime(1)
+		var pd: Ped = best
+		pd.hit(d["dmg"], dir, true)
+		if not pd.alive: m.play_at("splat", pd.global_position, -2.0)
+		_crime(2 if pd.role == "cop" or pd.role == "swat" else 1)
 	elif best is Car:
 		var c: Car = best
 		c.take_damage(d["dmg"])
 		c.velocity += dir * 0.4
 		if c.ctrl == Car.Ctrl.TRAFFIC and c.speed() < 6.0:
 			c.ignore_t = 0.5
-		_crime(2 if c.is_police else 1)
+		_crime(2 if c.is_police or c.has_meta("swat") else 1)
 		_spark(end, Color(1.0, 0.8, 0.3))
 	else:
 		_spark(end, Color(0.9, 0.9, 0.8))
 	_tracer(origin, end, d["color"])
-	m.play_at(d["snd"], origin, -3.0)
-	fired.emit()
 
-## Shooting peds/cars adds a star (at most one per 2.5 s); shooting police always does.
+## Shooting peds/cars adds a star at most every 2.5 s; shooting police at most every 1 s.
+var cop_cd := 0.0
 func _crime(stars: int) -> void:
 	if stars > 1:
+		if Time.get_ticks_msec() / 1000.0 < cop_cd: return
+		cop_cd = Time.get_ticks_msec() / 1000.0 + 1.0
 		Game.add_wanted(1)
 		return
 	if wanted_cd > 0.0: return

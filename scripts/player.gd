@@ -9,6 +9,7 @@ var auto_move := Vector2.ZERO   # used by screenshot scripts
 var health := 100.0
 var dying := false
 var knock := Vector3.ZERO
+var busy := false            # breaking into a car
 
 func hurt(d: float, push := Vector3.ZERO) -> void:
 	if dying: return
@@ -38,7 +39,7 @@ func _physics_process(dt: float) -> void:
 	if not visible: return
 	var v := Game.move_vector() + auto_move
 	v = v.limit_length(1.0)
-	if dying: v = Vector2.ZERO
+	if dying or busy: v = Vector2.ZERO
 	velocity = Vector3(v.x, 0, v.y) * walk_speed + knock
 	knock = knock.move_toward(Vector3.ZERO, 30.0 * dt)
 	move_and_slide()

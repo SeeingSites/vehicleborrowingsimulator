@@ -5,6 +5,7 @@ extends Node3D
 
 var P := Game.P
 var parked_spots: Array = []   # [Vector3 pos, float yaw]
+var block_kind := {}           # Vector2i -> "park" | "parking" | "buildings"
 var r := RandomNumberGenerator.new()
 var facade_mats := []
 var roof_mats := []
@@ -36,11 +37,11 @@ func build(seed_: int) -> void:
 			var lot := bw - Game.WALK * 2
 			var roll := r.randf()
 			if roll < 0.12:
-				_park(c, lot)
+				_park(c, lot); block_kind[Vector2i(bi, bj)] = "park"
 			elif roll < 0.22:
-				_parking(c, lot)
+				_parking(c, lot); block_kind[Vector2i(bi, bj)] = "parking"
 			else:
-				_buildings(c, lot)
+				_buildings(c, lot); block_kind[Vector2i(bi, bj)] = "buildings"
 	_markings()
 	if Game.signals: _signals()
 

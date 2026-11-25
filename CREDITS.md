@@ -16,8 +16,9 @@ CC0 needs no attribution; Kenney is credited here anyway (thank you!).
 Roads, sidewalks, markings, crossings, parks, parking lots, traffic lights, street lamps, pedestrians,
 the player, weapon pickups, tracers / muzzle flashes / sparks, smoke, fire and explosions are generated
 procedurally at runtime in GDScript (`scripts/tex.gd`, `scripts/city.gd`, `scripts/ped.gd`,
-`scripts/weapons.gd`, `scripts/main.gd`). All sound effects (engine, skid, siren, horn, thud, splat,
-explosion, pistol, SMG, pickup) are synthesised at runtime in `scripts/sfx.gd`. No audio assets are used.
+`scripts/weapons.gd`, `scripts/crime.gd`, `scripts/main.gd`), including the v4 garages, pads, payphones, signs and skull.
+Gang names (Neon Serpents, Iron Saints, Rust Kings) are original to this project. All sound effects (engine, skid, siren, horn, thud, splat,
+explosion, pistol, SMG, shotgun, punch, car alarm, phone ring, cash chime, spray, crusher) are synthesised at runtime in `scripts/sfx.gd`. No audio assets are used.
 
 - Engine: Godot Engine 4.7.2-stable (MIT licence), https://godotengine.org
 - Font: Godot's built-in default font.

@@ -10,11 +10,25 @@ const NB := 8            # blocks per side -> road nodes 0..NB
 signal wanted_changed(level)
 signal cash_changed(amount)
 signal message(text, color)
+signal ped_killed(ped, by_player)
+signal respect_changed
+signal npc_fired
+
+# ---- crime economy (v4) ----
+var mult := 1                 # cash multiplier: +1 per mission / kill frenzy, reset when busted or wasted
+const MULT_MAX := 5
+var respect := [0, 0, 0]      # per gang, -100..100
+var cop_sees := false         # set every frame by crime.gd; wanted decays only while false
+const EVADE := 12.0           # seconds unseen to lose one star
+const GANGS := [
+	{"name": "NEON SERPENTS", "short": "SERPENTS", "col": Color(0.25, 0.95, 0.45), "rival": 1},
+	{"name": "IRON SAINTS",   "short": "SAINTS",   "col": Color(0.95, 0.22, 0.22), "rival": 2},
+	{"name": "RUST KINGS",    "short": "KINGS",    "col": Color(1.0, 0.58, 0.12), "rival": 0},
+]
 
 var cash := 0
 var wanted := 0
 var wanted_timer := 0.0
-const WANTED_DECAY := 25.0
 
 # Touch input written by the on-screen controls.
 var touch_vec := Vector2.ZERO
@@ -22,6 +36,7 @@ var touch_handbrake := false
 var force_touch_ui := false
 
 var shot := ""
+var test := false
 var sim_seconds := 0.0      # --sim=N : headless traffic simulation, prints jam metrics
 var traffic_cars := 34
 var car_contacts := 0      # car-vs-car impacts > 3 m/s (sim metric)
@@ -38,6 +53,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			shot = a.substr(7)
+		elif a == "--test":
+			test = true
 		elif a == "--touch":
 			force_touch_ui = true
 		elif a.begins_with("--sim="):
@@ -48,6 +65,11 @@ func _ready() -> void:
 			rng.seed = int(a.substr(7))
 		elif a == "--no-signals":
 			signals = false
+	if OS.has_feature("web"):
+		# ?shot=v4_steal etc. runs a scripted scenario in the browser (used for phone-emulation checks)
+		var qs := str(JavaScriptBridge.eval("window.location.search", true))
+		for kv in qs.trim_prefix("?").split("&"):
+			if kv.begins_with("shot="): shot = kv.substr(5)
 	_add_action("move_up", [KEY_W, KEY_UP])
 	_add_action("move_down", [KEY_S, KEY_DOWN])
 	_add_action("move_left", [KEY_A, KEY_LEFT])
@@ -88,6 +110,28 @@ func add_cash(n: int) -> void:
 	cash += n
 	cash_changed.emit(cash)
 
+## Crime payout through the multiplier; returns the amount paid.
+func reward(base: int, label := "", col := Color(1, 0.9, 0.2)) -> int:
+	var n := base * mult
+	add_cash(n)
+	message.emit(("+$%d" % n) + ("  " + label if label != "" else ""), col)
+	return n
+
+func add_respect(g: int, d: int) -> void:
+	if g < 0 or g > 2: return
+	respect[g] = clampi(respect[g] + d, -100, 100)
+	respect_changed.emit()
+
+## Turf: west = Serpents, east = Saints, south-middle = Kings, north-middle neutral.
+static func gang_at_block(b: Vector2i) -> int:
+	if b.x <= 2: return 0
+	if b.x >= 5: return 1
+	if b.y >= 4: return 2
+	return -1
+
+static func block_of(p: Vector3) -> Vector2i:
+	return Vector2i(clampi(int(floor(p.x / P)), 0, NB - 1), clampi(int(floor(p.z / P)), 0, NB - 1))
+
 func add_wanted(n: int) -> void:
 	set_wanted(wanted + n)
 
@@ -98,9 +142,13 @@ func set_wanted(n: int) -> void:
 
 func _process(delta: float) -> void:
 	if wanted > 0:
-		wanted_timer += delta
-		if wanted_timer > WANTED_DECAY:
-			set_wanted(wanted - 1)
+		if cop_sees:
+			wanted_timer = 0.0
+		else:
+			wanted_timer += delta
+			if wanted_timer > EVADE:
+				set_wanted(wanted - 1)
+				if wanted == 0: message.emit("LOST THEM", Color(0.6, 1.0, 0.6))
 
 func _physics_process(delta: float) -> void:
 	sig_time += delta
