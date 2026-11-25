@@ -32,18 +32,12 @@ func _input(ev: InputEvent) -> void:
 				stick_origin = Vector2(ev.position.x, ev.position.y - size.y)
 				stick_pos = Vector2.ZERO
 			elif ev.position.distance_to(_enter_btn()) < 75:
-				var a := InputEventAction.new(); a.action = "enter_exit"; a.pressed = true
-				Input.parse_input_event(a)
-				var b := InputEventAction.new(); b.action = "enter_exit"; b.pressed = false
-				Input.parse_input_event.call_deferred(b)
+				_tap("enter_exit")
 			elif ev.position.distance_to(_fire_btn()) < 70:
 				fire_id = ev.index
 				Input.action_press("fire")
 			elif ev.position.distance_to(_wpn_btn()) < 42:
-				var a2 := InputEventAction.new(); a2.action = "weapon_next"; a2.pressed = true
-				Input.parse_input_event(a2)
-				var b2 := InputEventAction.new(); b2.action = "weapon_next"; b2.pressed = false
-				Input.parse_input_event.call_deferred(b2)
+				_tap("weapon_next")
 			elif ev.position.distance_to(_horn_btn()) < 50:
 				horn_id = ev.index
 				Input.action_press("horn")
@@ -65,6 +59,15 @@ func _input(ev: InputEvent) -> void:
 		stick_pos = (ev.position - _base()).limit_length(RADIUS)
 		Game.touch_vec = stick_pos / RADIUS
 		queue_redraw()
+
+## Press an action for one full physics tick. Both actions are read with is_action_just_pressed()
+## in _physics_process; releasing on the same frame (as a deferred call did) drops the tap on
+## displays faster than the 60 Hz physics rate, where many frames run no physics step at all.
+func _tap(action: String) -> void:
+	Input.action_press(action)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	Input.action_release(action)
 
 func _draw() -> void:
 	var b := _base()

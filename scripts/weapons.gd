@@ -158,11 +158,12 @@ func _pellet(origin: Vector3, aim: Vector3, d: Dictionary) -> void:
 		_crime(2 if pd.role == "cop" or pd.role == "swat" else 1)
 	elif best is Car:
 		var c: Car = best
+		var was_wreck := c.dead
 		c.take_damage(d["dmg"])
 		c.velocity += dir * 0.4
 		if c.ctrl == Car.Ctrl.TRAFFIC and c.speed() < 6.0:
 			c.ignore_t = 0.5
-		_crime(2 if c.is_police or c.has_meta("swat") else 1)
+		if not was_wreck: _crime(2 if c.is_police or c.has_meta("swat") else 1)
 		_spark(end, Color(1.0, 0.8, 0.3))
 	else:
 		_spark(end, Color(0.9, 0.9, 0.8))

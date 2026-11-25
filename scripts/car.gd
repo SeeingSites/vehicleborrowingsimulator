@@ -248,6 +248,9 @@ func _drive(dt: float) -> void:
 	if impact > 7.0 and hit_cd <= 0.0:
 		hit_cd = 0.4
 		var dmg := (impact - 7.0) * 5.0
+		# pursuit cars converging on the player bump each other constantly; without this they
+		# wreck (and chain-explode) themselves within seconds at 4+ stars
+		if ctrl == Ctrl.POLICE and other is Car and other.ctrl == Ctrl.POLICE: dmg *= 0.25
 		# one crash can wreck a car but never makes it explode outright
 		take_damage(minf(dmg / mass, 60.0))
 		if other is Car: other.take_damage(minf(dmg * 0.8 * mass / other.mass, 60.0))
@@ -361,8 +364,10 @@ func _hit_peds() -> void:
 	if speed() < 4.0: return
 	var pos := global_position
 	var fwd := forward(); var rt := global_transform.basis.x
+	var pursuit := ctrl == Ctrl.POLICE
 	for p in get_tree().get_nodes_in_group("peds"):
 		if not p.alive: continue
+		if pursuit and (p.role == "cop" or p.role == "swat"): continue   # don't mow down their own foot cops
 		var d: Vector3 = p.global_position - pos
 		d.y = 0
 		if absf(d.dot(fwd)) < 2.5 and absf(d.dot(rt)) < 1.3:

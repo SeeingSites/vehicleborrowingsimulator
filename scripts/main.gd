@@ -84,7 +84,14 @@ func _ready() -> void:
 	if Game.sim_seconds > 0.0:
 		load("res://scripts/sim.gd").new().run(self)
 	if Game.test:
-		load("res://scripts/tests.gd").new().run(self)
+		# watchdog: a script error in the checks must fail the run, not hang it
+		get_tree().create_timer(600.0, true, false, true).timeout.connect(func():
+			print("TESTS timed out"); get_tree().quit(2))
+		var tests = load("res://scripts/tests.gd")
+		if tests == null or not tests.can_instantiate():
+			print("TESTS could not load scripts/tests.gd"); get_tree().quit(2)
+		else:
+			tests.new().run(self)
 	if Game.shot != "":
 		load("res://scripts/shots.gd").new().run(self, Game.shot)
 
@@ -109,14 +116,25 @@ func spawn_traffic_at(node: Vector2i, dir: Vector2i, t: float) -> Car:
 	c.velocity = c.forward() * 8.0
 	return c
 
-func spawn_traffic_random() -> Car:
+## Spawns a traffic car on a random lane segment that is clear of other cars and at least
+## `min_d` from `avoid` (used to keep respawns out of the player's view). Returns null if no slot.
+func spawn_traffic_random(avoid := Vector3.ZERO, min_d := 0.0) -> Car:
 	var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-	while true:
+	for k in 64:
 		var n := Vector2i(Game.rng.randi_range(0, Game.NB), Game.rng.randi_range(0, Game.NB))
 		var d: Vector2i = dirs[Game.rng.randi() % 4]
-		if Game.in_grid(n + d):
-			return spawn_traffic_at(n, d, Game.rng.randf_range(0.3, 0.7))
+		if not Game.in_grid(n + d): continue
+		var t := Game.rng.randf_range(0.3, 0.7)
+		var pos := Game.node_pos(n).lerp(Game.node_pos(n + d), t) + Game.right_of(d) * Game.LANE
+		if min_d > 0.0 and pos.distance_to(avoid) < min_d: continue
+		if _car_near(pos, 7.0): continue
+		return spawn_traffic_at(n, d, t)
 	return null
+
+func _car_near(pos: Vector3, r: float) -> bool:
+	for c in get_tree().get_nodes_in_group("cars"):
+		if c.global_position.distance_to(pos) < r: return true
+	return false
 
 func spawn_ped(b: Vector2i, role := "civ", gang := -1) -> Ped:
 	var p := Ped.new()
@@ -334,7 +352,7 @@ func toggle_car() -> void:
 		var c := player_car
 		c.ctrl = Car.Ctrl.NONE
 		player_car = null
-		player.global_position = c.global_position - c.global_transform.basis.x * 2.0 + Vector3(0, 0.2, 0)
+		player.global_position = _exit_spot(c)
 		player.visible = true
 		player.collision_layer = 4
 		player.collision_mask = 1 | 2
@@ -346,6 +364,18 @@ func toggle_car() -> void:
 		if d < bd: bd = d; best = c
 	if best == null: return
 	enter_car(best)
+
+## Where to put the player when leaving `c`: driver side, else passenger side, else front/back,
+## whichever isn't blocked by a building or another car.
+func _exit_spot(c: Car) -> Vector3:
+	var b := c.global_transform.basis
+	var from := c.global_position + Vector3(0, 1.0, 0)
+	var space := get_world_3d().direct_space_state
+	for off in [-b.x * 2.0, b.x * 2.0, -b.z * 4.0, b.z * 4.0]:
+		var q := PhysicsRayQueryParameters3D.create(from, from + off + off.normalized() * 0.6, 1 | 2, [c.get_rid()])
+		if space.intersect_ray(q).is_empty():
+			return c.global_position + off + Vector3(0, 0.2, 0)
+	return c.global_position - b.x * 2.0 + Vector3(0, 0.2, 0)
 
 func enter_car(c: Car, forced := false) -> void:
 	if c.dead: return
@@ -380,9 +410,7 @@ func _recycle() -> void:
 	for c in get_tree().get_nodes_in_group("cars"):
 		if c.ctrl == Car.Ctrl.TRAFFIC and not c.dead: live += 1
 	if live < n_traffic and Game.shot == "":
-		var c := spawn_traffic_random()
-		if c.global_position.distance_to(player_target().global_position) < 45.0:
-			c.queue_free()
+		spawn_traffic_random(player_target().global_position, 45.0)
 	for p in get_tree().get_nodes_in_group("dead_peds"):
 		if p.dead_t > 20.0:
 			p.queue_free()
