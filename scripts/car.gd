@@ -61,6 +61,11 @@ var siren_a: MeshInstance3D
 var siren_b: MeshInstance3D
 var skid_t := 0.0
 var siren_light: OmniLight3D
+var blame_t := -INF              # Game.clock when the player last damaged this car (explosion kill credit)
+
+## True if the player caused this car's damage recently (shot it, rammed it, or blew up a car next to it).
+func player_blamed() -> bool:
+	return ctrl == Ctrl.PLAYER or Game.clock - blame_t < 12.0
 
 ## Car types: Kenney Car Kit (CC0) model + handling.
 ## [model, target length m, max_speed, accel, turn_rate, grip, drift_grip, mass]
@@ -253,7 +258,12 @@ func _drive(dt: float) -> void:
 		if ctrl == Ctrl.POLICE and other is Car and other.ctrl == Ctrl.POLICE: dmg *= 0.25
 		# one crash can wreck a car but never makes it explode outright
 		take_damage(minf(dmg / mass, 60.0))
-		if other is Car: other.take_damage(minf(dmg * 0.8 * mass / other.mass, 60.0))
+		if other is Car:
+			other.take_damage(minf(dmg * 0.8 * mass / other.mass, 60.0))
+			# the other car usually reports the same contact in its own move_and_slide: count it once
+			other.hit_cd = maxf(other.hit_cd, 0.4)
+			if ctrl == Ctrl.PLAYER: other.blame_t = Game.clock
+			elif other.ctrl == Ctrl.PLAYER: blame_t = Game.clock
 		if Game.main: Game.main.play_at("thud", global_position, clampf(-14.0 + impact, -14.0, 4.0))
 	global_position.y = 0.0
 	rotation.x = 0.0; rotation.z = 0.0
@@ -285,18 +295,60 @@ func respray(tint: Color) -> void:
 	if smoke: smoke.queue_free(); smoke = null
 	if fire: fire.queue_free(); fire = null
 	if fire_light: fire_light.queue_free(); fire_light = null
-	_tint(model, tint)
+	repaint(tint)
 
-func _tint(n: Node, tint: Color) -> void:
-	if n is MeshInstance3D:
-		var mi := n as MeshInstance3D
-		for i in mi.mesh.get_surface_count():
-			var base := mi.mesh.surface_get_material(i)
-			if base is StandardMaterial3D:
-				var mat := (base as StandardMaterial3D).duplicate() as StandardMaterial3D
-				mat.albedo_color = tint
-				mi.set_surface_override_material(i, mat)
-	for ch in n.get_children(): _tint(ch, tint)
+## New body paint. The Kenney models share one palette texture, so multiplying the albedo tinted
+## windows, lights and tyres too. Instead swap only the body's dominant paint swatch in a copy of
+## the palette and use it on the body mesh (wheels and the rest of the palette stay untouched).
+static var _paint_px := {}    # car_type -> Vector2i palette pixel of the paint
+static var _paint_tex := {}   # "type|colour" -> Texture2D
+func repaint(paint: Color) -> void:
+	var body := model.get_node_or_null("body") as MeshInstance3D
+	if body == null or body.mesh == null: return
+	var base := body.mesh.surface_get_material(0) as StandardMaterial3D
+	if base == null or base.albedo_texture == null: return
+	var key := "%s|%s" % [car_type, paint.to_html(false)]
+	if not _paint_tex.has(key):
+		var img := base.albedo_texture.get_image()
+		if img == null: return
+		img = img.duplicate()
+		if img.is_compressed(): img.decompress()
+		img.clear_mipmaps()
+		if not _paint_px.has(car_type): _paint_px[car_type] = _dominant_px(body.mesh, img.get_size())
+		var px: Vector2i = _paint_px[car_type]
+		var old := img.get_pixelv(px)
+		var lum_old := maxf(old.get_luminance(), 0.05)
+		for y in img.get_height():
+			for x in img.get_width():
+				var c := img.get_pixel(x, y)
+				if absf(c.r - old.r) + absf(c.g - old.g) + absf(c.b - old.b) < 0.06:
+					var k := clampf(c.get_luminance() / lum_old, 0.6, 1.3)
+					img.set_pixel(x, y, Color(paint.r * k, paint.g * k, paint.b * k, c.a))
+		img.generate_mipmaps()
+		_paint_tex[key] = ImageTexture.create_from_image(img)
+	var mat := base.duplicate() as StandardMaterial3D
+	mat.albedo_texture = _paint_tex[key]
+	body.set_surface_override_material(0, mat)
+
+## Palette pixel covering the most surface area of the mesh = the paint colour.
+static func _dominant_px(mesh: Mesh, size: Vector2i) -> Vector2i:
+	var arr := mesh.surface_get_arrays(0)
+	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var uvs: PackedVector2Array = arr[Mesh.ARRAY_TEX_UV]
+	var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX] if arr[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+	if idx.is_empty():
+		for i in verts.size(): idx.append(i)
+	var area := {}
+	for t in range(0, idx.size() - 2, 3):
+		var a := idx[t]; var b := idx[t + 1]; var c := idx[t + 2]
+		var ar := (verts[b] - verts[a]).cross(verts[c] - verts[a]).length()
+		var uv := (uvs[a] + uvs[b] + uvs[c]) / 3.0
+		var px := Vector2i(clampi(int(uv.x * size.x), 0, size.x - 1), clampi(int(uv.y * size.y), 0, size.y - 1))
+		area[px] = area.get(px, 0.0) + ar
+	var best := Vector2i.ZERO; var ba := -1.0
+	for px in area:
+		if area[px] > ba: ba = area[px]; best = px
+	return best
 
 func _ensure_smoke() -> void:
 	if smoke: return
@@ -358,14 +410,14 @@ func explode() -> void:
 	add_to_group("wrecks")
 	velocity += Vector3(randf_range(-2, 2), 0, randf_range(-2, 2))
 	exploded.emit(self)
-	if Game.main: Game.main.explosion(global_position, self)
+	if Game.main: Game.main.explosion(global_position, self, player_blamed())
 
 func _hit_peds() -> void:
 	if speed() < 4.0: return
 	var pos := global_position
 	var fwd := forward(); var rt := global_transform.basis.x
 	var pursuit := ctrl == Ctrl.POLICE
-	for p in get_tree().get_nodes_in_group("peds"):
+	for p in _near_peds(pos, 3.2):
 		if not p.alive: continue
 		if pursuit and (p.role == "cop" or p.role == "swat"): continue   # don't mow down their own foot cops
 		var d: Vector3 = p.global_position - pos
@@ -374,7 +426,8 @@ func _hit_peds() -> void:
 			p.kill(velocity, ctrl == Ctrl.PLAYER)
 			if Game.main: Game.main.play_at("splat", p.global_position, 0.0)
 			if ctrl == Ctrl.PLAYER:
-				Game.add_wanted(1)
+				# a sidewalk ploughing used to jump straight to 6 stars (+1 per body)
+				Game.add_wanted_limited("runover", 2.5)
 	var pl = Game.main.player if Game.main else null
 	# police only run you down deliberately from 4 stars; otherwise they brake to arrest
 	if pl and pl.visible and not pl.dying and speed() > 6.0 and (ctrl != Ctrl.POLICE or Game.wanted >= 4):
@@ -388,12 +441,12 @@ func _obstacle_ahead() -> bool:
 	if ignore_t > 0.0: return false
 	var fwd := forward(); var rt := global_transform.basis.x
 	var look := 6.0 + speed() * 0.5
-	for c in get_tree().get_nodes_in_group("cars"):
+	for c in _near_cars(global_position, look + 2.5):
 		if c == self: continue
 		var d: Vector3 = c.global_position - global_position
 		var a := d.dot(fwd)
 		if a > 0.5 and a < look and absf(d.dot(rt)) < 2.4: return true
-	for p in get_tree().get_nodes_in_group("peds"):
+	for p in _near_peds(global_position, look + 2.0):
 		if not p.alive: continue
 		var d: Vector3 = p.global_position - global_position
 		var a := d.dot(fwd)
@@ -438,7 +491,7 @@ func _may_enter(nd: Vector2i) -> bool:
 	# don't block the box: the exit lane must have room
 	var e0 := _entry_point(nd)
 	var nd3 := Vector3(nd.x, 0, nd.y)
-	for c in get_tree().get_nodes_in_group("cars"):
+	for c in _near_cars(e0 + nd3 * 2.25, 7.0):
 		if c == self: continue
 		var rel: Vector3 = c.global_position - e0
 		var a := rel.dot(nd3)
@@ -447,10 +500,10 @@ func _may_enter(nd: Vector2i) -> bool:
 	var left := Vector2i(ai_dir.y, -ai_dir.x)
 	if nd == left:
 		var npos := Game.node_pos(ai_node)
-		for c in get_tree().get_nodes_in_group("cars"):
+		# gap acceptance: after waiting a while, only yield to cars that are close
+		var gap := 24.0 if held_t < 3.0 else 14.0
+		for c in _near_cars(npos, gap):
 			if c == self or c.ctrl != Ctrl.TRAFFIC: continue
-			# gap acceptance: after waiting a while, only yield to cars that are close
-			var gap := 24.0 if held_t < 3.0 else 14.0
 			if c.ai_node == ai_node and c.speed() > 1.0 and c.global_position.distance_to(npos) < gap:
 				var cd: Vector2i = c.ai_dir
 				if (c.ai_phase == 0 and cd == -ai_dir) or (c.ai_phase == 1 and cd == -ai_dir):
@@ -587,3 +640,10 @@ func _ai_police(dt: float) -> void:
 	else:
 		throttle = 1.0 if absf(diff) < 1.3 else 0.5
 	_unstick(dt)
+
+# ---------- neighbour queries (spatial grid in main.gd, rebuilt every physics tick) ----------
+func _near_cars(p: Vector3, r: float) -> Array:
+	return Game.main.near_cars(p, r) if Game.main else get_tree().get_nodes_in_group("cars")
+
+func _near_peds(p: Vector3, r: float) -> Array:
+	return Game.main.near_peds(p, r) if Game.main else get_tree().get_nodes_in_group("peds")

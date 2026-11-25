@@ -13,7 +13,7 @@ const CAR_VALUE := {"sedan": 400, "sports": 1200, "hatchback": 500, "taxi": 450,
 const SHOP := [["pistol", 150, 30], ["smg", 400, 120], ["shotgun", 600, 16]]
 const RESPRAY_COST := 500
 const REPAIR_COST := 150
-const TINTS := [Color(1.0, 0.55, 0.55), Color(0.55, 0.7, 1.0), Color(0.6, 1.0, 0.6), Color(1.0, 0.9, 0.5), Color(0.85, 0.6, 1.0), Color(0.55, 0.55, 0.6)]
+const TINTS := [Color(0.8, 0.1, 0.1), Color(0.1, 0.3, 0.85), Color(0.1, 0.55, 0.2), Color(0.95, 0.75, 0.1), Color(0.5, 0.15, 0.6), Color(0.15, 0.15, 0.18), Color(0.92, 0.92, 0.92)]
 const MISSIONS := [
 	[{"kind": "steal", "car": "sports", "time": 150.0, "pay": 1500, "title": "HOT WHEELS"},
 	 {"kind": "hit", "time": 120.0, "pay": 2500, "title": "SAINTS' DAY"}],
@@ -279,7 +279,9 @@ func mugged(p: Ped) -> void:
 # ---------------------------------------------------------------- kills / gangs / frenzy
 func _on_killed(p: Ped, by_player: bool) -> void:
 	if not mission.is_empty() and mission["kind"] == "hit" and p == mission.get("target"):
-		_mission_pass()
+		# the job is yours to do: traffic or a gang war getting him first doesn't count
+		if by_player: _mission_pass()
+		else: _mission_fail("SOMEONE ELSE GOT HIM")
 	if not by_player: return
 	if not frenzy.is_empty():
 		frenzy["got"] += 1

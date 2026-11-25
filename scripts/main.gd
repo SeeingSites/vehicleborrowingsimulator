@@ -224,7 +224,7 @@ func _update_audio() -> void:
 			if a.playing: a.stop()
 
 ## Fireball, flash, debris, scorch mark, sound and blast damage.
-func explosion(pos: Vector3, src: Node) -> void:
+func explosion(pos: Vector3, src: Node, blame := false) -> void:
 	play_at("explosion", pos, 6.0)
 	shake = 0.6
 	var root := Node3D.new()
@@ -297,11 +297,12 @@ func explosion(pos: Vector3, src: Node) -> void:
 		if c == src or c.dead: continue
 		var d: float = c.global_position.distance_to(pos)
 		if d < 10.0:
+			if blame: c.blame_t = Game.clock   # chain reactions stay the player's doing
 			c.take_damage(95.0 * (1.0 - d / 10.0))
 			c.velocity += (c.global_position - pos).normalized() * 12.0 * (1.0 - d / 10.0)
 	for p in get_tree().get_nodes_in_group("peds"):
 		var d: float = p.global_position.distance_to(pos)
-		if d < 7.0 and p.alive: p.kill((p.global_position - pos).normalized())
+		if d < 7.0 and p.alive: p.kill((p.global_position - pos).normalized(), blame)
 	if src == player_car or (player.visible and player.global_position.distance_to(pos) < 6.5):
 		wasted()
 
@@ -337,7 +338,40 @@ func respawn_at(pos: Vector3) -> void:
 	player.busy = false
 	cam.global_position = Vector3(pos.x, cam_h, pos.z)
 
+# ---- spatial grid: cars/peds bucketed by cell, rebuilt once per physics tick (main runs before
+# its children), so the AI's neighbour checks don't scan every car and ped for every car. ----
+const CELL := 16.0
+var _grid_cars := {}
+var _grid_peds := {}
+
+func _rebuild_grid() -> void:
+	_grid_cars.clear(); _grid_peds.clear()
+	for c in get_tree().get_nodes_in_group("cars"): _bucket(_grid_cars, c)
+	for p in get_tree().get_nodes_in_group("peds"): _bucket(_grid_peds, p)
+
+func _bucket(g: Dictionary, n: Node3D) -> void:
+	var k := Vector2i(floori(n.global_position.x / CELL), floori(n.global_position.z / CELL))
+	if g.has(k): g[k].append(n)
+	else: g[k] = [n]
+
+func _query(g: Dictionary, p: Vector3, r: float) -> Array:
+	var out := []
+	var x0 := floori((p.x - r) / CELL); var x1 := floori((p.x + r) / CELL)
+	var z0 := floori((p.z - r) / CELL); var z1 := floori((p.z + r) / CELL)
+	for x in range(x0, x1 + 1):
+		for z in range(z0, z1 + 1):
+			var b = g.get(Vector2i(x, z))
+			if b != null:
+				for n in b:
+					if is_instance_valid(n): out.append(n)
+	return out
+
+## Cars / peds in the grid cells overlapping a circle of radius r (callers do the exact test).
+func near_cars(p: Vector3, r: float) -> Array: return _query(_grid_cars, p, r)
+func near_peds(p: Vector3, r: float) -> Array: return _query(_grid_peds, p, r)
+
 func _physics_process(dt: float) -> void:
+	_rebuild_grid()
 	if Input.is_action_just_pressed("enter_exit") and not player.dying:
 		toggle_car()
 	if city.lamp_mats.size() > 0: city.update_lamps()
@@ -407,8 +441,16 @@ func _recycle() -> void:
 		if w.get_meta("age") > 60.0 and w != player_car and w.global_position.distance_to(cam.global_position) > 70.0:
 			w.queue_free()
 	var live := 0
+	var dt := get_physics_process_delta_time()
+	var mission_car = crime.mission.get("target") if crime else null
 	for c in get_tree().get_nodes_in_group("cars"):
 		if c.ctrl == Car.Ctrl.TRAFFIC and not c.dead: live += 1
+		# cars the player stole and left behind: remove after a minute out of sight
+		elif c.ctrl == Car.Ctrl.NONE and not c.dead and c.get_meta("owned", false) and c != player_car and c != mission_car:
+			var idle: float = c.get_meta("idle", 0.0)
+			idle = idle + dt if c.global_position.distance_to(cam.global_position) > 90.0 else 0.0
+			c.set_meta("idle", idle)
+			if idle > 60.0: c.queue_free()
 	if live < n_traffic and Game.shot == "":
 		spawn_traffic_random(player_target().global_position, 45.0)
 	for p in get_tree().get_nodes_in_group("dead_peds"):

@@ -159,6 +159,7 @@ func _pellet(origin: Vector3, aim: Vector3, d: Dictionary) -> void:
 	elif best is Car:
 		var c: Car = best
 		var was_wreck := c.dead
+		c.blame_t = Game.clock
 		c.take_damage(d["dmg"])
 		c.velocity += dir * 0.4
 		if c.ctrl == Car.Ctrl.TRAFFIC and c.speed() < 6.0:
@@ -170,12 +171,9 @@ func _pellet(origin: Vector3, aim: Vector3, d: Dictionary) -> void:
 	_tracer(origin, end, d["color"])
 
 ## Shooting peds/cars adds a star at most every 2.5 s; shooting police at most every 1 s.
-var cop_cd := 0.0
 func _crime(stars: int) -> void:
 	if stars > 1:
-		if Time.get_ticks_msec() / 1000.0 < cop_cd: return
-		cop_cd = Time.get_ticks_msec() / 1000.0 + 1.0
-		Game.add_wanted(1)
+		Game.add_wanted_limited("shoot_cop", 1.0)
 		return
 	if wanted_cd > 0.0: return
 	wanted_cd = 2.5

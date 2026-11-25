@@ -28,6 +28,11 @@ func _quiet(pos: Vector3, r := 14.0) -> void:
 		if k.ctrl == Car.Ctrl.POLICE or k.has_meta("roadblock") or k.dead or k.burn_t >= 0.0: k.queue_free()
 
 func _reset() -> void:
+	# let a WASTED / BUSTED sequence from the previous check finish, or its pending respawn
+	# would teleport the player in the middle of the next check
+	for k in 60:
+		if not m.player.dying and not c.busy: break
+		await _wait(0.1)
 	if m.player_car: m.toggle_car()
 	m.player.dying = false; m.player.busy = false; m.player.health = 100.0; m.player.visible = true
 	Game.set_wanted(0); Game.cop_sees = false
@@ -391,3 +396,83 @@ func _regressions() -> void:
 			if o != tc2 and o.global_position.distance_to(tc2.global_position) < 7.0: bad += 1
 		if tc2.global_position.distance_to(m.player.global_position) < 45.0: bad += 1
 	ok("traffic respawn: clear lane, away from the player", bad == 0, "bad=%d" % bad)
+	await _design_fixes()
+
+## Checks for the design-level fixes (second review pass).
+func _design_fixes() -> void:
+	var P := Game.P
+	# running over a crowd: +1 star, not +1 per body
+	await _reset()
+	var pos := _spot(5)
+	_quiet(pos, 40.0)
+	await _wait(0.1)
+	var car: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sports")
+	m.enter_car(car, true)
+	Game.set_wanted(0)
+	for k in 5:
+		var v: Ped = m.spawn_ped(Game.block_of(pos)); v.set_physics_process(false)
+		v.global_position = pos + Vector3(4.0 + k * 1.2, 0.2, 0)
+	car.velocity = car.forward() * 20.0
+	await _wait(0.6)
+	var killed := 0
+	for v in get_tree().get_nodes_in_group("dead_peds"):
+		if v.global_position.distance_to(pos) < 25.0: killed += 1
+	ok("running over a crowd: one star, not one per body", killed >= 3 and Game.wanted == 1, "killed=%d wanted=%d" % [killed, Game.wanted])
+	m.toggle_car()
+	# hit job: someone else killing the target fails it
+	await _reset()
+	Game.respect = [30, 0, 0]
+	c.mission_done[0] = 1
+	m.player.global_position = c.phones[0][0] + Vector3(1, 0, 0)
+	m.toggle_car()
+	var tgt: Ped = c.mission.get("target")
+	tgt.kill(Vector3.FORWARD, false)
+	ok("hit job: target killed by someone else -> failed", tgt != null and c.mission.is_empty() and c.last_event == "mission_fail", c.last_event)
+	Game.respect = [0, 0, 0]
+	# explosion credit: a car the player shot blows up and kills a ped -> player's kill
+	await _reset()
+	pos = _spot(6)
+	_quiet(pos, 30.0)
+	await _wait(0.1)
+	var bomb: Car = m.spawn_car(pos, 0.0, Color.WHITE, false, "sedan")
+	var by := Ped.new(); m.add_child(by); by.setup(Game.block_of(pos)); by.set_physics_process(false)
+	by.global_position = pos + Vector3(3, 0.2, 0)
+	var credit := [false]
+	var cb := func(p, bp): if p == by: credit[0] = bp
+	Game.ped_killed.connect(cb)
+	bomb.blame_t = Game.clock
+	bomb.explode()
+	Game.ped_killed.disconnect(cb)
+	ok("explosion of a car the player shot: kills count as the player's", not by.alive and credit[0])
+	# abandoned stolen cars are cleaned up out of sight
+	await _reset()
+	var ab: Car = m.spawn_car(_spot(7), 0.0, Color.WHITE, false, "sedan")
+	ab.set_meta("owned", true)
+	ab.set_meta("idle", 59.95)
+	m.player.global_position = ab.global_position + Vector3(0, 0, 120.0)
+	m.cam.global_position = Vector3(m.player.global_position.x, m.cam_h, m.player.global_position.z)
+	await _wait(0.3)
+	ok("abandoned stolen car removed after a minute out of sight", not is_instance_valid(ab) or ab.is_queued_for_deletion())
+	# respray repaints the body only (wheels keep their material)
+	var rc: Car = m.spawn_car(_spot(8), 0.0, Color.WHITE, false, "taxi")
+	rc.respray(Color(0.1, 0.3, 0.85))
+	var body := rc.model.get_node("body") as MeshInstance3D
+	var wheel := rc.model.get_node("wheel-front-left") as MeshInstance3D
+	var bmat := body.get_surface_override_material(0) as StandardMaterial3D
+	var ok_paint: bool = bmat != null and bmat.albedo_texture != body.mesh.surface_get_material(0).albedo_texture and bmat.albedo_color == Color.WHITE
+	ok("respray: body gets a repainted palette, wheels untouched", ok_paint and wheel.get_surface_override_material(0) == null)
+	rc.queue_free()
+	# one crash is counted once for both cars
+	await _reset()
+	pos = _spot(9) + Vector3(0, 0, 0)
+	_quiet(pos, 30.0)
+	await _wait(0.1)
+	var a: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sedan")
+	var b: Car = m.spawn_car(pos + Vector3(7, 0, 0), Game.yaw_of(Vector3(-1, 0, 0)), Color.WHITE, false, "sedan")
+	a.velocity = Vector3(14, 0, 0); b.velocity = Vector3(-14, 0, 0)
+	a.ctrl = Car.Ctrl.PLAYER   # full throttle-free coast; PLAYER so input is read (none pressed)
+	await _wait(0.5)
+	a.ctrl = Car.Ctrl.NONE
+	var lost_a := 100.0 - a.health; var lost_b := 100.0 - b.health
+	ok("head-on crash damages each car once", lost_a > 0.0 and lost_b > 0.0 and lost_a <= 60.0 and lost_b <= 60.0, "a=%.0f b=%.0f" % [lost_a, lost_b])
+	a.queue_free(); b.queue_free()
