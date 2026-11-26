@@ -523,3 +523,10 @@ func _design_fixes() -> void:
 	Game.set_wanted(0)
 	ok("cleared wanted: cop car heads for the junction ahead on its road", pc.ctrl == Car.Ctrl.TRAFFIC and pc.ai_dir == Vector2i(0, 1) and pc.ai_node == Vector2i(3, 5), "dir=%s node=%s" % [pc.ai_dir, pc.ai_node])
 	pc.queue_free()
+	# pause and new game
+	m.pause.toggle()
+	var was_paused: bool = get_tree().paused
+	m.pause.toggle()
+	Game.cash = 999; Game.mult = 4; Game.respect = [50, 0, 0]
+	m.pause.new_game(false)
+	ok("pause toggles; NEW GAME resets progress", was_paused and not get_tree().paused and Game.cash == 0 and Game.mult == 1 and Game.respect == [0, 0, 0])
