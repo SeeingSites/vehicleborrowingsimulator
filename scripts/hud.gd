@@ -36,7 +36,7 @@ func _ready() -> void:
 	msg_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	msg_l.size = Vector2(800, 90)
 	hint_l = _label(16, Color(0.9, 0.9, 0.9))
-	hint_l.text = "WASD move · E steal/enter/exit car, answer phones · SPACE handbrake · H horn · CTRL/F/click fire or punch · Q weapon"
+	hint_l.text = "WASD move · E steal/enter/exit car, answer phones · SPACE handbrake · H horn · CTRL/F/click fire or punch · Q weapon · Esc pause"
 	Game.message.connect(_on_msg)
 	panel = Panel2.new()
 	add_child(panel)

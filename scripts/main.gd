@@ -18,6 +18,8 @@ var n_peds := 90
 var shake := 0.0
 var weapons
 var crime
+var save
+var pause
 var fps_t := 0.0
 var engine_snd: AudioStreamPlayer
 var skid_snd: AudioStreamPlayer
@@ -77,6 +79,11 @@ func _ready() -> void:
 	touch = load("res://scripts/touch.gd").new()
 	hud.add_child(touch)
 	hud.touch_ui = touch
+	save = load("res://scripts/save.gd").new()
+	add_child(save)
+	save.setup(self, not Game.test and Game.sim_seconds <= 0.0 and Game.shot == "" and Game.play == "")
+	pause = load("res://scripts/pause.gd").new()
+	add_child(pause)
 	Game.wanted_changed.connect(_on_wanted)
 	engine_snd = _loop_player("engine", -10.0)
 	skid_snd = _loop_player("skid", -12.0)
@@ -177,8 +184,17 @@ func _on_wanted(level: int) -> void:
 	if level == 0:
 		for c in get_tree().get_nodes_in_group("cars"):
 			if c.ctrl == Car.Ctrl.POLICE:
-				var n := Vector2i(clampi(roundi(c.global_position.x / Game.P), 0, Game.NB - 1), clampi(roundi(c.global_position.z / Game.P), 0, Game.NB))
-				c.start_traffic(n, Vector2i(1, 0))
+				# rejoin traffic on the road it's on, heading the way it faces (it used to aim for an
+				# arbitrary junction eastwards, cutting across blocks)
+				var f: Vector3 = c.forward()
+				var d := Vector2i(signi(roundi(f.x * 2.0)), 0) if absf(f.x) > absf(f.z) else Vector2i(0, signi(roundi(f.z * 2.0)))
+				if d == Vector2i.ZERO: d = Vector2i(1, 0)
+				var p: Vector3 = c.global_position
+				var n := Vector2i(clampi(floori(p.x / Game.P) if d.x > 0 else ceili(p.x / Game.P), 0, Game.NB), clampi(floori(p.z / Game.P) if d.y > 0 else ceili(p.z / Game.P), 0, Game.NB))
+				if d.x == 0: n.x = clampi(roundi(p.x / Game.P), 0, Game.NB)
+				else: n.y = clampi(roundi(p.z / Game.P), 0, Game.NB)
+				if not Game.in_grid(n + d): d = -d; n = n - d
+				c.start_traffic(n, d)
 
 func _setup_skids() -> void:
 	skids = MultiMeshInstance3D.new()
