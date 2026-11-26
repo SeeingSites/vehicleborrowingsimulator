@@ -543,3 +543,13 @@ func _design_fixes() -> void:
 	var start_pauses: bool = get_tree().paused
 	m.pause.toggle()
 	ok("gamepad Start pauses", start_pauses and not get_tree().paused)
+	# mute toggle is remembered in the save
+	var mk := InputEventKey.new(); mk.physical_keycode = KEY_M; mk.pressed = true
+	Game._unhandled_input(mk)
+	var muted_now := Game.is_muted()
+	m.save.save_game("user://test_mute.cfg")
+	Game.set_muted(false)
+	m.save.load_game("user://test_mute.cfg")
+	ok("M mutes; mute is restored from the save", muted_now and Game.is_muted())
+	Game.set_muted(false)
+	m.save.reset("user://test_mute.cfg")
