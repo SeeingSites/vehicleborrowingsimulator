@@ -405,6 +405,8 @@ func _design_fixes() -> void:
 	await _reset()
 	var pos := _spot(5)
 	_quiet(pos, 40.0)
+	for k in get_tree().get_nodes_in_group("cars"):
+		if k.global_position.distance_to(pos + Vector3(10, 0, 0)) < 14.0: k.queue_free()   # clear the run-up
 	await _wait(0.1)
 	var car: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sports")
 	m.enter_car(car, true)
@@ -476,3 +478,28 @@ func _design_fixes() -> void:
 	var lost_a := 100.0 - a.health; var lost_b := 100.0 - b.health
 	ok("head-on crash damages each car once", lost_a > 0.0 and lost_b > 0.0 and lost_a <= 60.0 and lost_b <= 60.0, "a=%.0f b=%.0f" % [lost_a, lost_b])
 	a.queue_free(); b.queue_free()
+	# police spawn on a clear lane, out of sight when possible
+	await _reset()
+	var hidden := 0; var clash := 0
+	for k in 10:
+		var sp: Vector3 = m.police_spawn_point(m.player.global_position)
+		if sp == Vector3.INF: continue
+		if not c.los(sp, m.player.global_position): hidden += 1
+		if m._car_near(sp, 6.0): clash += 1
+	ok("police spawn: clear lane, out of the player's sight", clash == 0 and hidden >= 8, "hidden=%d clash=%d" % [hidden, clash])
+	# pedestrians sometimes jump clear of a speeding car
+	await _reset()
+	pos = _spot(10)
+	_quiet(pos, 40.0)
+	await _wait(0.1)
+	var dodged := 0
+	for k in 10:
+		var walker: Ped = m.spawn_ped(Game.block_of(pos)); walker.global_position = pos + Vector3(14.0, 0.2, k * 0.0)
+		var runner: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sports")
+		runner.ctrl = Car.Ctrl.NONE
+		runner.velocity = Vector3(18, 0, 0)
+		await _wait(1.2)
+		if walker.alive: dodged += 1
+		walker.queue_free(); runner.queue_free()
+		await _wait(0.05)
+	ok("pedestrians dodge speeding cars some of the time", dodged >= 2 and dodged <= 9, "dodged=%d/10" % dodged)

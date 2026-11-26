@@ -25,6 +25,9 @@ var mugged := false
 var shoot_cd := 0.0
 var leave_t := 0.0       # cops walking off after the heat is gone
 var mission_target := false
+var dodge_cd := 0.0
+var dodge_v := Vector3.ZERO
+var dodge_t := 0.0
 const ROLE_HP := {"civ": 20.0, "gang": 40.0, "cop": 50.0, "swat": 95.0}
 
 const SHIRTS := [Color(0.85, 0.2, 0.2), Color(0.2, 0.45, 0.85), Color(0.2, 0.7, 0.3), Color(0.9, 0.8, 0.2),
@@ -98,6 +101,8 @@ func _physics_process(dt: float) -> void:
 			flee_t = 7.0
 		return
 	shoot_cd -= dt
+	dodge_cd -= dt
+	if (dodge_t > 0.0 or dodge_cd <= 0.0) and _dodge(): return
 	if role == "cop" or role == "swat":
 		_ai_cop(dt); return
 	if role == "gang" and _ai_gang(dt): return
@@ -226,6 +231,29 @@ func npc_shoot(tgt: Node3D, dmg: float) -> void:
 	if hit:
 		if m.player_car: m.player_car.take_damage(dmg * 0.6)
 		else: m.player.hurt(dmg)
+
+## A car bearing down on us: 60% of the time jump clear (sideways, away from its path).
+func _dodge() -> bool:
+	if dodge_t > 0.0:
+		dodge_t -= get_physics_process_delta_time()
+		global_position += dodge_v * get_physics_process_delta_time()
+		return true
+	var m = Game.main
+	if m == null: return false
+	for c in m.near_cars(global_position, 14.0):
+		if c.dead or c.speed() < 7.0: continue
+		var rel: Vector3 = global_position - c.global_position; rel.y = 0
+		var fwd: Vector3 = c.velocity.normalized()
+		var ahead := rel.dot(fwd)
+		var side := rel.dot(Vector3(-fwd.z, 0, fwd.x))
+		if ahead > 1.0 and ahead < 2.0 + c.speed() * 0.45 and absf(side) < 1.6:
+			dodge_cd = 1.5
+			if Game.rng.randf() < 0.6:
+				dodge_v = Vector3(-fwd.z, 0, fwd.x) * (signf(side) if side != 0.0 else 1.0) * 7.0
+				dodge_t = 0.35
+				return true
+			return false
+	return false
 
 ## Bullet / punch damage; dies at 0 hp.
 func hit(dmg: float, dir: Vector3, by_player := false) -> void:
