@@ -22,6 +22,7 @@ var horn_id := -1
 var fire_id := -1
 func _fire_btn() -> Vector2: return Vector2(size.x - 110, size.y - 110)
 func _wpn_btn() -> Vector2: return Vector2(size.x - 60, size.y - 360)
+func _pause_btn() -> Vector2: return Vector2(size.x * 0.5, size.y - 36)
 
 func _input(ev: InputEvent) -> void:
 	if not visible: return
@@ -31,6 +32,9 @@ func _input(ev: InputEvent) -> void:
 				stick_id = ev.index
 				stick_origin = Vector2(ev.position.x, ev.position.y - size.y)
 				stick_pos = Vector2.ZERO
+			elif ev.position.distance_to(_pause_btn()) < 30:
+				var pz = Game.main.pause if Game.main else null
+				if pz: pz.toggle()
 			elif ev.position.distance_to(_enter_btn()) < 75:
 				_tap("enter_exit")
 			elif ev.position.distance_to(_fire_btn()) < 70:
@@ -75,7 +79,7 @@ func _draw() -> void:
 	draw_arc(b, RADIUS, 0, TAU, 48, Color(1, 1, 1, 0.5), 3.0)
 	draw_circle(b + stick_pos, 48, Color(1, 1, 1, 0.45))
 	var font := ThemeDB.fallback_font
-	for pair in [[_enter_btn(), _enter_label(), Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0], [_fire_btn(), "FIRE", Color(0.95, 0.15, 0.15, 0.5), 70.0], [_wpn_btn(), "WPN", Color(0.9, 0.8, 0.2, 0.45), 40.0]]:
+	for pair in [[_enter_btn(), _enter_label(), Color(0.2, 0.8, 0.3, 0.45), 70.0], [_drift_btn(), "DRIFT", Color(0.9, 0.4, 0.2, 0.45), 70.0], [_horn_btn(), "HORN", Color(0.3, 0.5, 0.95, 0.45), 45.0], [_fire_btn(), "FIRE", Color(0.95, 0.15, 0.15, 0.5), 70.0], [_wpn_btn(), "WPN", Color(0.9, 0.8, 0.2, 0.45), 40.0], [_pause_btn(), "II", Color(0.5, 0.5, 0.5, 0.45), 26.0]]:
 		draw_circle(pair[0], pair[3], pair[2])
 		draw_arc(pair[0], pair[3], 0, TAU, 48, Color(1, 1, 1, 0.6), 3.0)
 		var fs := 20 if pair[3] < 60 else (24 if String(pair[1]).length() <= 5 else 21)

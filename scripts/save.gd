@@ -19,7 +19,9 @@ func _physics_process(dt: float) -> void:
 		save_game()
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST and enabled: save_game()
+	# a browser tab never sends the close request: also save when it's hidden / loses focus
+	if enabled and what in [NOTIFICATION_WM_CLOSE_REQUEST, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_APPLICATION_PAUSED]:
+		save_game()
 
 func save_game(path := PATH) -> void:
 	var cf := ConfigFile.new()
