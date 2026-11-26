@@ -13,7 +13,7 @@ const CAR_VALUE := {"sedan": 400, "sports": 1200, "hatchback": 500, "taxi": 450,
 const SHOP := [["pistol", 150, 30], ["smg", 400, 120], ["shotgun", 600, 16]]
 const RESPRAY_COST := 500
 const REPAIR_COST := 150
-const TINTS := [Color(1.0, 0.55, 0.55), Color(0.55, 0.7, 1.0), Color(0.6, 1.0, 0.6), Color(1.0, 0.9, 0.5), Color(0.85, 0.6, 1.0), Color(0.55, 0.55, 0.6)]
+const TINTS := [Color(0.8, 0.1, 0.1), Color(0.1, 0.3, 0.85), Color(0.1, 0.55, 0.2), Color(0.95, 0.75, 0.1), Color(0.5, 0.15, 0.6), Color(0.15, 0.15, 0.18), Color(0.92, 0.92, 0.92)]
 const MISSIONS := [
 	[{"kind": "steal", "car": "sports", "time": 150.0, "pay": 1500, "title": "HOT WHEELS"},
 	 {"kind": "hit", "time": 120.0, "pay": 2500, "title": "SAINTS' DAY"}],
@@ -209,7 +209,7 @@ func is_cop_car(c) -> bool:
 func foot_cops() -> Array:
 	var out := []
 	for p in get_tree().get_nodes_in_group("armed"):
-		if p.alive and (p.role == "cop" or p.role == "swat"): out.append(p)
+		if p.alive and (p.role == "cop" or p.role == "swat") and not p.is_queued_for_deletion(): out.append(p)
 	return out
 
 ## "COP" if police can see `pos`, "WITNESS" if a bystander is close, else "".
@@ -278,8 +278,10 @@ func mugged(p: Ped) -> void:
 
 # ---------------------------------------------------------------- kills / gangs / frenzy
 func _on_killed(p: Ped, by_player: bool) -> void:
-	if p.mission_target and not mission.is_empty() and mission["kind"] == "hit":
-		_mission_pass()
+	if not mission.is_empty() and mission["kind"] == "hit" and p == mission.get("target"):
+		# the job is yours to do: traffic or a gang war getting him first doesn't count
+		if by_player: _mission_pass()
+		else: _mission_fail("SOMEONE ELSE GOT HIM")
 	if not by_player: return
 	if not frenzy.is_empty():
 		frenzy["got"] += 1
@@ -432,6 +434,7 @@ func _mission_tick(dt: float) -> void:
 				m.toggle_car()
 				c.ctrl = Car.Ctrl.NONE
 				c.set_meta("owned", false)
+				c.remove_from_group("cars")   # can't be re-entered (or shot / recycled) while it sinks
 				var tw := create_tween(); tw.tween_property(c, "global_position:y", -3.0, 1.5); tw.tween_callback(c.queue_free)
 				_mission_pass()
 		"hit":
@@ -467,6 +470,9 @@ func _mission_fail(why: String) -> void:
 	_mission_clear()
 
 func _mission_clear() -> void:
+	# a lieutenant from a failed hit job goes back to being an ordinary gang member
+	var t = mission.get("target")
+	if is_instance_valid(t) and t is Ped: t.mission_target = false
 	mission = {}
 	if beacon: beacon.visible = false
 	if checkpoint: checkpoint.visible = false
@@ -527,8 +533,7 @@ func after_wasted() -> void:
 	last_event = "wasted"
 
 func _clear_cops() -> void:
-	for p in foot_cops():
-		if p.global_position.distance_to(m.player.global_position) > 0.0: p.queue_free()
+	for p in foot_cops(): p.queue_free()
 
 # ---------------------------------------------------------------- police
 func _spawn_swat_van(pos: Vector3) -> Car:
@@ -555,18 +560,23 @@ func _police(dt: float) -> void:
 	rb_cd -= dt
 	var w := Game.wanted
 	if w > 0 and police_cd <= 0.0 and not m.player.dying:
-		if cars.size() < COP_CARS[w]:
-			police_cd = 3.0
-			m.spawn_police_near(tp)
-		elif vans.size() < SWAT_VANS[w]:
+		# SWAT gets priority once at least one cop car is on you, so wrecked cop cars
+		# being replaced can't starve the vans forever
+		if vans.size() < SWAT_VANS[w] and (cars.size() > 0 or COP_CARS[w] == 0):
 			police_cd = 4.0
 			_spawn_swat_van(tp)
+		elif cars.size() < COP_CARS[w]:
+			police_cd = 3.0
+			m.spawn_police_near(tp)
 	# cops get out on foot when they catch up
 	for c in cars + vans:
 		if c.has_meta("deployed") or w == 0: continue
 		var d: float = c.global_position.distance_to(tp)
 		var on_foot: bool = m.player_car == null
-		if d < (14.0 if on_foot else 9.0) and c.speed() < 5.0:
+		# in a car, cops only get out once you've (nearly) stopped: deploying beside a moving car
+		# just got them run over, turning 1 star into 3 (run-over + cop killer) in one tick
+		var stopped: bool = on_foot or m.player_car.speed() < 4.0
+		if d < (14.0 if on_foot else 9.0) and c.speed() < 5.0 and stopped:
 			c.set_meta("deployed", true)
 			var swat: bool = c.has_meta("swat")
 			var n := 4 if swat else (1 if w == 1 else 2)
@@ -660,21 +670,24 @@ func _facilities(dt: float) -> void:
 	if here == pad_lock: return
 	if here == "respray":
 		if c.speed() > 3.0: return
-		pad_lock = here
-		respray(c)
+		if respray(c): pad_lock = here
 	elif here.begins_with("shop_"):
 		pad_lock = here
 		for s in shop_pads:
 			if "shop_" + s[1] == here: buy(s[1], s[2], s[3])
 
-func respray(c: Car) -> void:
+## Returns false only when it should retry while the car stays on the pad (a cop is watching).
+func respray(c: Car) -> bool:
 	if Game.wanted > 0 and Game.cop_sees:
-		Game.message.emit("LOSE THE COPS FIRST", Color(0.5, 0.7, 1.0)); last_event = "respray_seen"; return
+		if last_event != "respray_seen":
+			Game.message.emit("LOSE THE COPS FIRST", Color(0.5, 0.7, 1.0))
+		last_event = "respray_seen"
+		return false
 	var cost := RESPRAY_COST if Game.wanted > 0 else REPAIR_COST
 	if Game.wanted == 0 and c.health > 95.0:
-		zone("Pay 'n' Spray: nothing to fix"); return
+		zone("Pay 'n' Spray: nothing to fix"); return true
 	if Game.cash < cost:
-		Game.message.emit("NEED $%d" % cost, Color(1, 0.4, 0.4)); last_event = "respray_broke"; return
+		Game.message.emit("NEED $%d" % cost, Color(1, 0.4, 0.4)); last_event = "respray_broke"; return true
 	Game.add_cash(-cost)
 	c.respray(TINTS[Game.rng.randi() % TINTS.size()])
 	var had := Game.wanted
@@ -683,6 +696,7 @@ func respray(c: Car) -> void:
 	Game.message.emit("RESPRAY -$%d" % cost, Color(0.4, 0.75, 1.0))
 	zone("New paint, repaired" + ("  ·  WANTED LEVEL CLEARED" if had > 0 else ""))
 	last_event = "respray"
+	return true
 
 func crush(c: Car) -> void:
 	crush_t = 0.0

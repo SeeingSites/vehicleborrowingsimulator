@@ -24,9 +24,15 @@ func _quiet(pos: Vector3, r := 14.0) -> void:
 		if p.global_position.distance_to(pos) < r: p.queue_free()
 	for p in c.foot_cops(): p.queue_free()
 	for k in get_tree().get_nodes_in_group("cars"):
-		if k.ctrl == Car.Ctrl.POLICE or k.has_meta("roadblock"): k.queue_free()
+		# burning cars / wrecks left by earlier checks can explode and kill whoever the next check uses
+		if k.ctrl == Car.Ctrl.POLICE or k.has_meta("roadblock") or k.dead or k.burn_t >= 0.0: k.queue_free()
 
 func _reset() -> void:
+	# let a WASTED / BUSTED sequence from the previous check finish, or its pending respawn
+	# would teleport the player in the middle of the next check
+	for k in 60:
+		if not m.player.dying and not c.busy: break
+		await _wait(0.1)
 	if m.player_car: m.toggle_car()
 	m.player.dying = false; m.player.busy = false; m.player.health = 100.0; m.player.visible = true
 	Game.set_wanted(0); Game.cop_sees = false
@@ -48,6 +54,7 @@ func _go() -> void:
 	m.player.global_position = pos + Vector3(2.5, 0, 0)
 	Game.cash = 1000
 	m.toggle_car()
+	car.remove_meta("alarm")   # the 50% alarm may summon a witness: keep this check deterministic
 	ok("break-in starts (player frozen)", not c.breaking.is_empty() and m.player.busy)
 	await _wait(1.5)
 	ok("steal parked car unseen: in car, no stars, +$25", m.player_car == car and Game.wanted == 0 and Game.cash == 1025, "wanted=%d cash=%d" % [Game.wanted, Game.cash])
@@ -91,22 +98,20 @@ func _go() -> void:
 	Game.set_wanted(5)
 	m.player.health = 1000.0
 	m.god = true
+	# cop cars crash and burn at 5 stars, so track the peak counts over the window
 	var seen_van := false
+	var max_cars := 0; var max_vans := 0; var max_foot := 0
 	for k in 40:
 		await _wait(0.5)
+		cars = 0; vans = 0
 		for v in get_tree().get_nodes_in_group("cars"):
-			if v.has_meta("swat") and v.ctrl == Car.Ctrl.POLICE: seen_van = true
-	cars = 0; vans = 0
-	for k in get_tree().get_nodes_in_group("cars"):
-		if k.ctrl == Car.Ctrl.POLICE and not k.dead:
-			if k.has_meta("swat"): vans += 1
-			else: cars += 1
-	ok("5 stars: up to 4 cop cars (>=3 alive) + a SWAT van (max 1)", cars >= 3 and cars <= 4 and vans <= 1 and seen_van, "cars=%d vans=%d" % [cars, vans])
-	var swat := 0; var footcops := 0
-	for p in c.foot_cops():
-		if p.role == "swat": swat += 1
-		else: footcops += 1
-	ok("cops get out on foot when they reach you", footcops + swat > 0, "foot=%d swat=%d" % [footcops, swat])
+			if v.ctrl == Car.Ctrl.POLICE and not v.dead:
+				if v.has_meta("swat"): vans += 1; seen_van = true
+				else: cars += 1
+		max_cars = maxi(max_cars, cars); max_vans = maxi(max_vans, vans)
+		max_foot = maxi(max_foot, c.foot_cops().size())
+	ok("5 stars: up to 4 cop cars (>=3 at once) + a SWAT van (max 1)", max_cars >= 3 and max_cars <= 4 and max_vans <= 1 and seen_van, "max cars=%d vans=%d" % [max_cars, max_vans])
+	ok("cops get out on foot when they reach you", max_foot > 0, "max foot cops=%d" % max_foot)
 	c.no_bust = false
 	m.god = false
 	# roadblock
@@ -128,8 +133,12 @@ func _go() -> void:
 	c.police_cd = 99.0
 	var sh: Ped = c.spawn_cop(pos + Vector3(0, 0, 12.0))
 	m.player.health = 100.0
-	await _wait(3.0)
-	ok("3 stars: cops on foot shoot you", m.player.health < 100.0, "hp=%.0f" % m.player.health)
+	m.god = true   # a stray hit must not end the run in WASTED
+	for k in 16:   # 55% hit chance per shot: poll instead of a fixed 3 s window
+		await _wait(0.5)
+		if m.player.health < 100.0: break
+	m.god = false
+	ok("3 stars: cops on foot shoot you", sh != null and m.player.health < 100.0, "hp=%.0f" % m.player.health)
 	# 6. evasion
 	await _reset()
 	_quiet(Vector3.ZERO, 0.0)
@@ -292,5 +301,178 @@ func _go() -> void:
 	c.spawn_cop(pos + Vector3(0, 0, 6.0))
 	await _wait(5.0)
 	ok("1 star: a cop on foot runs you down and arrests you", c.last_event == "busted", c.last_event)
+	await _regressions()
 	print("TESTS passed=%d failed=%d" % [passed, failed])
 	get_tree().quit(1 if failed > 0 else 0)
+
+## Regression checks for bugs found in review.
+func _regressions() -> void:
+	var P := Game.P
+	# a lieutenant left over from a failed hit job must not pass the next hit job
+	await _reset()
+	Game.respect = [30, 0, 0]
+	c.mission_done[0] = 1
+	m.player.global_position = c.phones[0][0] + Vector3(1, 0, 0)
+	m.toggle_car()
+	var old: Ped = c.mission.get("target")
+	c._mission_fail("TEST")
+	ok("failed hit job: old target is no longer a mission target", old != null and not old.mission_target)
+	m.toggle_car()
+	var new_t: Ped = c.mission.get("target")
+	old.hit(999.0, Vector3.FORWARD, true)
+	await _wait(0.1)
+	ok("killing the old lieutenant doesn't pass the new hit job", not c.mission.is_empty() and new_t != old, c.last_event)
+	c._mission_clear()
+	Game.respect = [0, 0, 0]
+	# delivered mission car can't be re-entered while it sinks
+	await _reset()
+	m.player.global_position = c.phones[0][0] + Vector3(1, 0, 0)
+	c.mission_done[0] = 0
+	m.toggle_car()
+	var tc: Car = c.mission["target"]
+	m.enter_car(tc, true)
+	tc.global_position = c.drop_pos; tc.velocity = Vector3.ZERO
+	await _wait(0.3)
+	ok("delivered car leaves the 'cars' group", c.mission.is_empty() and m.player_car == null and not tc.is_in_group("cars"))
+	m.player.global_position = tc.global_position + Vector3(1.5, 0, 0)
+	m.toggle_car()
+	ok("delivered car can't be re-entered", m.player_car != tc and c.breaking.get("car") != tc)
+	if m.player_car: m.toggle_car()
+	c.breaking = {}; m.player.busy = false
+	await _wait(1.8)
+	# exiting a car parked against a building puts you on the open side
+	await _reset()
+	var wall_x := -1.0
+	var space: PhysicsDirectSpaceState3D = m.get_world_3d().direct_space_state
+	var probe := Vector3(3 * P + Game.ROAD_HALF + Game.WALK + 1.0, 1.0, 3 * P + P * 0.5)
+	var hit: Dictionary = space.intersect_ray(PhysicsRayQueryParameters3D.create(probe - Vector3(3, 0, 0), probe + Vector3(12, 0, 0), 1))
+	if not hit.is_empty(): wall_x = hit.position.x
+	if wall_x > 0.0:
+		var car: Car = m.spawn_car(Vector3(wall_x - 1.4, 0, probe.z), 0.0, Color.WHITE, false, "sedan")   # facing -Z, driver side (-X) open
+		car.rotation.y = PI   # facing +Z: driver side (-basis.x) is +X, i.e. the wall
+		await _wait(0.05)
+		m.enter_car(car, true)
+		m.toggle_car()
+		ok("exit: player not placed inside the building", m.player.global_position.x < wall_x, "x=%.1f wall=%.1f" % [m.player.global_position.x, wall_x])
+		car.queue_free()
+	else:
+		ok("exit: found a building wall to test against", false)
+	# shooting a wreck is not a crime
+	await _reset()
+	var pos := _spot(4)
+	_quiet(pos, 30.0)
+	await _wait(0.1)
+	m.player.global_position = pos
+	m.player.rotation.y = 0.0
+	var wreck: Car = m.spawn_car(pos + Vector3(0, 0, -6), 0.0, Color.WHITE, false, "sedan")
+	wreck.dead = true
+	wreck.add_to_group("wrecks")
+	m.weapons.wanted_cd = 0.0
+	m.weapons._pellet(pos + Vector3(0, 1.1, -0.8), Vector3(0, 0, -1), {"dmg": 10.0, "spread": 0.0, "range": 20.0, "color": Color.WHITE})
+	ok("shooting a wreck adds no wanted level", Game.wanted == 0, "w=%d" % Game.wanted)
+	wreck.queue_free()
+	# Pay 'n' Spray works once the watching cop loses sight, without leaving the pad
+	await _reset()
+	_quiet(c.respray_pos, 60.0)
+	var car2: Car = m.spawn_car(c.respray_pos + Vector3(0, 0, 12), 0.0, Color.WHITE, false, "sedan")
+	m.enter_car(car2, true)
+	Game.set_wanted(2); Game.cash = 1000; c.police_cd = 99.0
+	var spy: Ped = c.spawn_cop(c.respray_pos + Vector3(6, 0, 0)); spy.set_physics_process(false)
+	await _wait(0.4)
+	car2.global_position = c.respray_pos; car2.velocity = Vector3.ZERO
+	await _wait(0.5)
+	var refused: bool = c.last_event == "respray_seen"
+	spy.queue_free()
+	await _wait(0.8)
+	ok("Pay 'n' Spray: refused while seen, then sprays once the cop is gone", refused and Game.wanted == 0 and c.last_event == "respray", "ev=%s w=%d" % [c.last_event, Game.wanted])
+	c.police_cd = 0.0
+	m.toggle_car()
+	# traffic respawns never land on top of another car
+	var bad := 0
+	for k in 20:
+		var tc2: Car = m.spawn_traffic_random(m.player.global_position, 45.0)
+		if tc2 == null: continue
+		for o in get_tree().get_nodes_in_group("cars"):
+			if o != tc2 and o.global_position.distance_to(tc2.global_position) < 7.0: bad += 1
+		if tc2.global_position.distance_to(m.player.global_position) < 45.0: bad += 1
+	ok("traffic respawn: clear lane, away from the player", bad == 0, "bad=%d" % bad)
+	await _design_fixes()
+
+## Checks for the design-level fixes (second review pass).
+func _design_fixes() -> void:
+	var P := Game.P
+	# running over a crowd: +1 star, not +1 per body
+	await _reset()
+	var pos := _spot(5)
+	_quiet(pos, 40.0)
+	await _wait(0.1)
+	var car: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sports")
+	m.enter_car(car, true)
+	Game.set_wanted(0)
+	for k in 5:
+		var v: Ped = m.spawn_ped(Game.block_of(pos)); v.set_physics_process(false)
+		v.global_position = pos + Vector3(4.0 + k * 1.2, 0.2, 0)
+	car.velocity = car.forward() * 20.0
+	await _wait(0.6)
+	var killed := 0
+	for v in get_tree().get_nodes_in_group("dead_peds"):
+		if v.global_position.distance_to(pos) < 25.0: killed += 1
+	ok("running over a crowd: one star, not one per body", killed >= 3 and Game.wanted == 1, "killed=%d wanted=%d" % [killed, Game.wanted])
+	m.toggle_car()
+	# hit job: someone else killing the target fails it
+	await _reset()
+	Game.respect = [30, 0, 0]
+	c.mission_done[0] = 1
+	m.player.global_position = c.phones[0][0] + Vector3(1, 0, 0)
+	m.toggle_car()
+	var tgt: Ped = c.mission.get("target")
+	tgt.kill(Vector3.FORWARD, false)
+	ok("hit job: target killed by someone else -> failed", tgt != null and c.mission.is_empty() and c.last_event == "mission_fail", c.last_event)
+	Game.respect = [0, 0, 0]
+	# explosion credit: a car the player shot blows up and kills a ped -> player's kill
+	await _reset()
+	pos = _spot(6)
+	_quiet(pos, 30.0)
+	await _wait(0.1)
+	var bomb: Car = m.spawn_car(pos, 0.0, Color.WHITE, false, "sedan")
+	var by := Ped.new(); m.add_child(by); by.setup(Game.block_of(pos)); by.set_physics_process(false)
+	by.global_position = pos + Vector3(3, 0.2, 0)
+	var credit := [false]
+	var cb := func(p, bp): if p == by: credit[0] = bp
+	Game.ped_killed.connect(cb)
+	bomb.blame_t = Game.clock
+	bomb.explode()
+	Game.ped_killed.disconnect(cb)
+	ok("explosion of a car the player shot: kills count as the player's", not by.alive and credit[0])
+	# abandoned stolen cars are cleaned up out of sight
+	await _reset()
+	var ab: Car = m.spawn_car(_spot(7), 0.0, Color.WHITE, false, "sedan")
+	ab.set_meta("owned", true)
+	ab.set_meta("idle", 59.95)
+	m.player.global_position = ab.global_position + Vector3(0, 0, 120.0)
+	m.cam.global_position = Vector3(m.player.global_position.x, m.cam_h, m.player.global_position.z)
+	await _wait(0.3)
+	ok("abandoned stolen car removed after a minute out of sight", not is_instance_valid(ab) or ab.is_queued_for_deletion())
+	# respray repaints the body only (wheels keep their material)
+	var rc: Car = m.spawn_car(_spot(8), 0.0, Color.WHITE, false, "taxi")
+	rc.respray(Color(0.1, 0.3, 0.85))
+	var body := rc.model.get_node("body") as MeshInstance3D
+	var wheel := rc.model.get_node("wheel-front-left") as MeshInstance3D
+	var bmat := body.get_surface_override_material(0) as StandardMaterial3D
+	var ok_paint: bool = bmat != null and bmat.albedo_texture != body.mesh.surface_get_material(0).albedo_texture and bmat.albedo_color == Color.WHITE
+	ok("respray: body gets a repainted palette, wheels untouched", ok_paint and wheel.get_surface_override_material(0) == null)
+	rc.queue_free()
+	# one crash is counted once for both cars
+	await _reset()
+	pos = _spot(9) + Vector3(0, 0, 0)
+	_quiet(pos, 30.0)
+	await _wait(0.1)
+	var a: Car = m.spawn_car(pos, Game.yaw_of(Vector3(1, 0, 0)), Color.WHITE, false, "sedan")
+	var b: Car = m.spawn_car(pos + Vector3(7, 0, 0), Game.yaw_of(Vector3(-1, 0, 0)), Color.WHITE, false, "sedan")
+	a.velocity = Vector3(14, 0, 0); b.velocity = Vector3(-14, 0, 0)
+	a.ctrl = Car.Ctrl.PLAYER   # full throttle-free coast; PLAYER so input is read (none pressed)
+	await _wait(0.5)
+	a.ctrl = Car.Ctrl.NONE
+	var lost_a := 100.0 - a.health; var lost_b := 100.0 - b.health
+	ok("head-on crash damages each car once", lost_a > 0.0 and lost_b > 0.0 and lost_a <= 60.0 and lost_b <= 60.0, "a=%.0f b=%.0f" % [lost_a, lost_b])
+	a.queue_free(); b.queue_free()

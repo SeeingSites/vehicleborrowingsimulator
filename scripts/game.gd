@@ -36,12 +36,15 @@ var touch_handbrake := false
 var force_touch_ui := false
 
 var shot := ""
+var play := ""              # --play=NAME : scripted playthrough (scripts/play.gd)
 var test := false
 var sim_seconds := 0.0      # --sim=N : headless traffic simulation, prints jam metrics
 var traffic_cars := 34
 var car_contacts := 0      # car-vs-car impacts > 3 m/s (sim metric)
 var signals := true         # --no-signals : disable traffic lights / right-of-way (v1 behaviour)
 var sig_time := 0.0
+var clock := 0.0            # game-time seconds (physics ticks), unlike Time.get_ticks_msec() it follows --fixed-fps
+var _star_cd := {}
 const SIG_CYCLE := 16.0
 enum Light { GREEN, YELLOW, RED }
 var rng := RandomNumberGenerator.new()
@@ -53,6 +56,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			shot = a.substr(7)
+		elif a.begins_with("--play="):
+			play = a.substr(7)
 		elif a == "--test":
 			test = true
 		elif a == "--touch":
@@ -135,6 +140,13 @@ static func block_of(p: Vector3) -> Vector2i:
 func add_wanted(n: int) -> void:
 	set_wanted(wanted + n)
 
+## +n stars, but at most once per `cd` seconds for the same kind of crime (`key`).
+func add_wanted_limited(key: String, cd: float, n := 1) -> bool:
+	if clock < _star_cd.get(key, -INF): return false
+	_star_cd[key] = clock + cd
+	add_wanted(n)
+	return true
+
 func set_wanted(n: int) -> void:
 	wanted = clampi(n, 0, 6)
 	wanted_timer = 0.0
@@ -152,6 +164,7 @@ func _process(delta: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	sig_time += delta
+	clock += delta
 
 func signalled(n: Vector2i) -> bool:
 	var corner := (n.x == 0 or n.x == NB) and (n.y == 0 or n.y == NB)
