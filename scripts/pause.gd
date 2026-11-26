@@ -19,7 +19,7 @@ func _ready() -> void:
 	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(lbl)
 	newb = Label.new()
-	newb.text = "NEW GAME (N)"
+	newb.text = "NEW GAME (N / Select)"
 	newb.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	newb.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	newb.add_theme_font_size_override("font_size", 32)
@@ -59,10 +59,10 @@ func new_game(reload := true) -> void:
 	if reload: get_tree().reload_current_scene()
 
 func _unhandled_input(ev: InputEvent) -> void:
-	if ev is InputEventKey and ev.pressed and not ev.echo and (ev.physical_keycode == KEY_ESCAPE or ev.physical_keycode == KEY_P):
+	if ev.is_action_pressed("pause") and not ev.is_echo():
 		toggle()
 		get_viewport().set_input_as_handled()
-	elif visible and ev is InputEventKey and ev.pressed and ev.physical_keycode == KEY_N:
+	elif visible and ((ev is InputEventKey and ev.pressed and ev.physical_keycode == KEY_N) or (ev is InputEventJoypadButton and ev.pressed and ev.button_index == JOY_BUTTON_BACK)):
 		new_game()
 		get_viewport().set_input_as_handled()
 

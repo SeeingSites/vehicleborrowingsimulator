@@ -530,3 +530,16 @@ func _design_fixes() -> void:
 	Game.cash = 999; Game.mult = 4; Game.respect = [50, 0, 0]
 	m.pause.new_game(false)
 	ok("pause toggles; NEW GAME resets progress", was_paused and not get_tree().paused and Game.cash == 0 and Game.mult == 1 and Game.respect == [0, 0, 0])
+	# gamepad: every action has a controller binding
+	var unmapped := []
+	for act in ["move_up", "move_down", "move_left", "move_right", "enter_exit", "handbrake", "horn", "fire", "weapon_next", "pause"]:
+		var has_pad := false
+		for e in InputMap.action_get_events(act):
+			if e is InputEventJoypadButton or e is InputEventJoypadMotion: has_pad = true
+		if not has_pad: unmapped.append(act)
+	ok("gamepad: every action has a controller binding", unmapped.is_empty(), str(unmapped))
+	var pe := InputEventJoypadButton.new(); pe.button_index = JOY_BUTTON_START; pe.pressed = true
+	m.pause._unhandled_input(pe)
+	var start_pauses: bool = get_tree().paused
+	m.pause.toggle()
+	ok("gamepad Start pauses", start_pauses and not get_tree().paused)

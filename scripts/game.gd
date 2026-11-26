@@ -84,8 +84,18 @@ func _ready() -> void:
 	_add_action("horn", [KEY_H])
 	_add_action("fire", [KEY_CTRL, KEY_F])
 	_add_action("weapon_next", [KEY_Q, KEY_TAB])
+	_add_action("pause", [KEY_ESCAPE, KEY_P])
 	var mb := InputEventMouseButton.new(); mb.button_index = MOUSE_BUTTON_LEFT
 	InputMap.action_add_event("fire", mb)
+	# gamepad (only the left stick was mapped): Y enter/exit, X / RT fire, A / LT handbrake,
+	# LB horn, RB next weapon, Start pause
+	for pair in [["enter_exit", JOY_BUTTON_Y], ["fire", JOY_BUTTON_X], ["handbrake", JOY_BUTTON_A],
+			["horn", JOY_BUTTON_LEFT_SHOULDER], ["weapon_next", JOY_BUTTON_RIGHT_SHOULDER], ["pause", JOY_BUTTON_START]]:
+		var jb := InputEventJoypadButton.new(); jb.button_index = pair[1]
+		InputMap.action_add_event(pair[0], jb)
+	for pair in [["fire", JOY_AXIS_TRIGGER_RIGHT], ["handbrake", JOY_AXIS_TRIGGER_LEFT]]:
+		var ja := InputEventJoypadMotion.new(); ja.axis = pair[1]; ja.axis_value = 1.0
+		InputMap.action_add_event(pair[0], ja)
 
 func _add_action(name: String, keys: Array) -> void:
 	if not InputMap.has_action(name):

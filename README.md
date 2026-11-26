@@ -39,6 +39,7 @@ Notes
 - E or Enter (touch: STEAL / ENTER / EXIT / PHONE): steal or enter the nearest car / exit / answer a payphone
 - Space (touch: DRIFT): handbrake / drift
 - H (touch: HORN): horn
+- Gamepad: left stick move, Y enter/exit, X or RT fire, A or LT handbrake, LB horn, RB next weapon, Start pause.
 - Esc / P (touch: II button): pause; N or the NEW GAME button on the pause screen wipes the save. Progress (cash, multiplier, gang respect, missions done, ammo) is saved automatically.
 - Ctrl / F / left click (touch: FIRE): shoot, or punch / mug with no gun. Q / Tab (touch: WPN): next weapon. On foot you shoot where you
   face; in a car it's a forward drive-by. Pistol, SMG and shotgun pickups (spinning boxes on sidewalk corners, also
