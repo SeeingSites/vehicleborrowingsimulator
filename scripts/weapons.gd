@@ -143,11 +143,13 @@ func _pellet(origin: Vector3, aim: Vector3, d: Dictionary) -> void:
 		end = hit.position; rng = origin.distance_to(end)
 	# nearest target along the ray (peds have no colliders; cars use their footprint)
 	var best = null; var bt := rng
-	for p in get_tree().get_nodes_in_group("peds"):
+	var mid := origin + dir * rng * 0.5
+	for p in m.near_peds(mid, rng * 0.5 + 1.0):
+		if not p.alive: continue
 		var tt := _ray_hit(origin, dir, p.global_position, 0.8, bt)
 		if tt >= 0.0: best = p; bt = tt
-	for c in get_tree().get_nodes_in_group("cars"):
-		if c == m.player_car: continue
+	for c in m.near_cars(mid, rng * 0.5 + 2.0):
+		if c == m.player_car or not c.is_in_group("cars"): continue
 		var tt := _ray_hit(origin, dir, c.global_position, 1.7, bt)
 		if tt >= 0.0: best = c; bt = tt
 	end = origin + dir * bt

@@ -150,15 +150,23 @@ func spawn_ped(b: Vector2i, role := "civ", gang := -1) -> Ped:
 	p.setup(b, role, gang)
 	return p
 
-func spawn_police_near(pos: Vector3, min_d := 45.0, max_d := 80.0) -> Car:
-	var best := Vector2i(-1, -1)
+## A junction lane 45-80 m from `pos` with no car on it, preferably out of the player's sight
+## (cops used to pop into view, sometimes inside another car). Vector3.INF if none.
+func police_spawn_point(pos: Vector3, min_d := 45.0, max_d := 80.0) -> Vector3:
+	var fallback := Vector3.INF
 	for k in 40:
 		var n := Vector2i(Game.rng.randi_range(0, Game.NB), Game.rng.randi_range(0, Game.NB))
-		var d := Game.node_pos(n).distance_to(pos)
-		if d > min_d and d < max_d:
-			best = n; break
-	if best.x < 0: return null
-	var c := spawn_car(Game.node_pos(best) + Vector3(Game.LANE, 0, 0), 0.0, Color.WHITE, true)
+		var p := Game.node_pos(n) + Vector3(Game.LANE, 0, 0)
+		var d := p.distance_to(pos)
+		if d <= min_d or d >= max_d or _car_near(p, 6.0): continue
+		if crime == null or not crime.los(p, pos): return p
+		if fallback == Vector3.INF: fallback = p
+	return fallback
+
+func spawn_police_near(pos: Vector3, min_d := 45.0, max_d := 80.0, type := "") -> Car:
+	var p := police_spawn_point(pos, min_d, max_d)
+	if p == Vector3.INF: return null
+	var c := spawn_car(p, 0.0, Color.WHITE, type == "", type)
 	c.start_police()
 	return c
 

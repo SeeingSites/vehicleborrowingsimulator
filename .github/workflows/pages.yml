@@ -3,6 +3,7 @@ name: Deploy web build to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -55,6 +56,11 @@ jobs:
       - name: Import project
         run: ~/godot-bin/godot --headless --path . --import || true
 
+      - name: Headless gameplay tests
+        run: |
+          set -o pipefail
+          timeout 900 ~/godot-bin/godot --headless --fixed-fps 60 --path . -- --test 2>&1 | grep -E "^(PASS|FAIL|TESTS)"
+
       - name: Export Web build
         run: |
           set -euo pipefail
@@ -66,12 +72,15 @@ jobs:
           du -sh web_build
 
       - uses: actions/configure-pages@v6
+        if: github.event_name != 'pull_request'
 
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: web_build
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-24.04
     environment:

@@ -537,14 +537,10 @@ func _clear_cops() -> void:
 
 # ---------------------------------------------------------------- police
 func _spawn_swat_van(pos: Vector3) -> Car:
-	var c: Car = m.spawn_police_near(pos)
-	if c == null: return null
-	var at := c.global_position
-	c.queue_free()
-	var van: Car = m.spawn_car(at, 0.0, Color.WHITE, false, "van")
+	var van: Car = m.spawn_police_near(pos, 45.0, 80.0, "van")
+	if van == null: return null
 	van.set_meta("swat", true)
 	van.respray(Color(0.25, 0.28, 0.4))
-	van.start_police()
 	van.max_speed = 30.0
 	return van
 
