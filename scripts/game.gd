@@ -85,6 +85,7 @@ func _ready() -> void:
 	_add_action("fire", [KEY_CTRL, KEY_F])
 	_add_action("weapon_next", [KEY_Q, KEY_TAB])
 	_add_action("pause", [KEY_ESCAPE, KEY_P])
+	_add_action("mute", [KEY_M])
 	var mb := InputEventMouseButton.new(); mb.button_index = MOUSE_BUTTON_LEFT
 	InputMap.action_add_event("fire", mb)
 	# gamepad (only the left stick was mapped): Y enter/exit, X / RT fire, A / LT handbrake,
@@ -111,6 +112,17 @@ func _add_action(name: String, keys: Array) -> void:
 		j.axis = map[name][0]
 		j.axis_value = map[name][1]
 		InputMap.action_add_event(name, j)
+
+func set_muted(on: bool) -> void:
+	AudioServer.set_bus_mute(0, on)
+
+func is_muted() -> bool:
+	return AudioServer.is_bus_mute(0)
+
+func _unhandled_input(ev: InputEvent) -> void:
+	if ev.is_action_pressed("mute") and not ev.is_echo():
+		set_muted(not is_muted())
+		message.emit("SOUND OFF" if is_muted() else "SOUND ON", Color(0.8, 0.8, 0.8))
 
 ## Combined keyboard / gamepad / virtual joystick vector (x right, y down).
 func move_vector() -> Vector2:

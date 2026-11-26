@@ -31,6 +31,7 @@ func save_game(path := PATH) -> void:
 	cf.set_value("game", "mission_done", m.crime.mission_done)
 	cf.set_value("game", "ammo", m.weapons.ammo)
 	cf.set_value("game", "weapon", m.weapons.current)
+	cf.set_value("settings", "muted", Game.is_muted())
 	cf.save(path)
 
 func load_game(path := PATH) -> bool:
@@ -45,6 +46,7 @@ func load_game(path := PATH) -> bool:
 	if md.size() == 3: m.crime.mission_done = md.duplicate()
 	m.weapons.ammo = (cf.get_value("game", "ammo", {}) as Dictionary).duplicate()
 	m.weapons.current = str(cf.get_value("game", "weapon", ""))
+	Game.set_muted(bool(cf.get_value("settings", "muted", false)))
 	if m.hud: m.hud.shown_cash = float(Game.cash)
 	Game.respect_changed.emit()
 	return true
