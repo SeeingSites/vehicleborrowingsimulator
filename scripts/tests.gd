@@ -150,6 +150,8 @@ func _go() -> void:
 	ok("evading: star lost after 12 s unseen", Game.wanted == 0, "wanted=%d" % Game.wanted)
 	Game.set_wanted(1)
 	c.police_cd = 99.0
+	for k in get_tree().get_nodes_in_group("cars"):
+		if k.global_position.distance_to(m.player.global_position) < 40.0: k.queue_free()   # nothing to run the watcher over
 	var watcher: Ped = c.spawn_cop(m.player.global_position + Vector3(0, 0, 8.0)); watcher.set_physics_process(false)
 	await _wait(14.0)
 	ok("seen by a cop: star does not decay", Game.wanted == 1 and Game.cop_sees, "wanted=%d sees=%s" % [Game.wanted, Game.cop_sees])
@@ -503,3 +505,21 @@ func _design_fixes() -> void:
 		walker.queue_free(); runner.queue_free()
 		await _wait(0.05)
 	ok("pedestrians dodge speeding cars some of the time", dodged >= 2 and dodged <= 9, "dodged=%d/10" % dodged)
+	# progress save round-trip
+	var sp_path := "user://test_save.cfg"
+	Game.cash = 4321; Game.mult = 3; Game.respect = [10, -20, 30]; c.mission_done = [1, 0, 2]
+	m.weapons.ammo = {"smg": 77}; m.weapons.current = "smg"
+	m.save.save_game(sp_path)
+	Game.cash = 0; Game.mult = 1; Game.respect = [0, 0, 0]; c.mission_done = [0, 0, 0]; m.weapons.clear()
+	var loaded: bool = m.save.load_game(sp_path)
+	ok("save/load keeps cash, multiplier, respect, missions and ammo", loaded and Game.cash == 4321 and Game.mult == 3 and Game.respect == [10, -20, 30] and c.mission_done == [1, 0, 2] and m.weapons.ammo.get("smg", 0) == 77 and m.weapons.current == "smg")
+	m.save.reset(sp_path)
+	Game.respect = [0, 0, 0]; c.mission_done = [0, 0, 0]; Game.mult = 1
+	# losing the cops: police cars rejoin traffic on their own road
+	await _reset()
+	var pc: Car = m.spawn_car(Vector3(3 * P + Game.LANE, 0, 4 * P + 12.0), Game.yaw_of(Vector3(0, 0, 1)), Color.WHITE, true)
+	pc.start_police()
+	Game.set_wanted(1)
+	Game.set_wanted(0)
+	ok("cleared wanted: cop car heads for the junction ahead on its road", pc.ctrl == Car.Ctrl.TRAFFIC and pc.ai_dir == Vector2i(0, 1) and pc.ai_node == Vector2i(3, 5), "dir=%s node=%s" % [pc.ai_dir, pc.ai_node])
+	pc.queue_free()

@@ -460,6 +460,7 @@ func _mission_pass() -> void:
 	mission_done[g] = maxi(mission_done[g], mission["idx"] + 1)
 	last_event = "mission_pass_%d" % g
 	_mission_clear()
+	if m.save and m.save.enabled: m.save.save_game()
 
 func _mission_fail(why: String) -> void:
 	if mission.is_empty(): return
