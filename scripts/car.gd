@@ -257,9 +257,9 @@ func _drive(dt: float) -> void:
 		# wreck (and chain-explode) themselves within seconds at 4+ stars
 		if ctrl == Ctrl.POLICE and other is Car and other.ctrl == Ctrl.POLICE: dmg *= 0.25
 		# one crash can wreck a car but never makes it explode outright
-		take_damage(minf(dmg / mass, 60.0))
+		take_damage(minf(dmg / mass, _crash_cap(other)))
 		if other is Car:
-			other.take_damage(minf(dmg * 0.8 * mass / other.mass, 60.0))
+			other.take_damage(minf(dmg * 0.8 * mass / other.mass, other._crash_cap(self)))
 			# the other car usually reports the same contact in its own move_and_slide: count it once
 			other.hit_cd = maxf(other.hit_cd, 0.4)
 			if ctrl == Ctrl.PLAYER: other.blame_t = Game.clock
@@ -275,6 +275,12 @@ func _drive(dt: float) -> void:
 	_hit_peds()
 
 # ---------- damage ----------
+## Most one crash can take off this car. Police contact with the player's car is a bump below
+## 4 stars (they're trying to arrest you) and only really hurts once they're out to stop you.
+func _crash_cap(other: Object) -> float:
+	if other is Car and ((ctrl == Ctrl.PLAYER and other.ctrl == Ctrl.POLICE) or (ctrl == Ctrl.POLICE and other.ctrl == Ctrl.PLAYER)):
+		return 20.0 if Game.wanted < 4 else 35.0
+	return 60.0
 func take_damage(d: float) -> void:
 	if dead or d <= 0.0: return
 	health -= d
@@ -608,7 +614,11 @@ func _unstick(dt: float) -> void:
 		stuck_t = 0.0
 
 # ---------- police AI ----------
+## Pursuit top speed by wanted level: low-heat cops can be outrun, 3+ stars they're flat out.
+const POLICE_TOP := [26.0, 26.0, 30.0, 34.0, 34.0, 34.0, 34.0]
+
 func _ai_police(dt: float) -> void:
+	max_speed = minf(POLICE_TOP[Game.wanted], 30.0 if has_meta("swat") else 34.0)
 	var pl = Game.main.player_target()
 	if pl == null:
 		throttle = 0.0; return
@@ -637,6 +647,14 @@ func _ai_police(dt: float) -> void:
 	var on_foot: bool = pl == Game.main.player
 	if on_foot and dist < (14.0 if Game.wanted < 4 else 6.0):
 		throttle = -1.0 if speed() > 2.0 else 0.0
+	elif not on_foot and Game.wanted < 4 and dist < 18.0 and hit.is_empty():
+		# below 4 stars cops tail you and box you in to make the arrest instead of ramming
+		# at full speed (two rams used to set your car on fire within a second)
+		var ps: float = pl.velocity.length()
+		var gap := 4.0 if ps < 3.0 else 9.0
+		var closing: float = velocity.dot((ppos - global_position).normalized()) - pl.velocity.dot((ppos - global_position).normalized())
+		var want_close := clampf((dist - gap) * 0.8, -2.0, 8.0)
+		throttle = 1.0 if closing < want_close else (-1.0 if closing > want_close + 2.0 else 0.0)
 	else:
 		throttle = 1.0 if absf(diff) < 1.3 else 0.5
 	_unstick(dt)

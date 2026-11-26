@@ -573,7 +573,10 @@ func _police(dt: float) -> void:
 		if c.has_meta("deployed") or w == 0: continue
 		var d: float = c.global_position.distance_to(tp)
 		var on_foot: bool = m.player_car == null
-		if d < (14.0 if on_foot else 9.0) and c.speed() < 5.0:
+		# in a car, cops only get out once you've (nearly) stopped: deploying beside a moving car
+		# just got them run over, turning 1 star into 3 (run-over + cop killer) in one tick
+		var stopped: bool = on_foot or m.player_car.speed() < 4.0
+		if d < (14.0 if on_foot else 9.0) and c.speed() < 5.0 and stopped:
 			c.set_meta("deployed", true)
 			var swat: bool = c.has_meta("swat")
 			var n := 4 if swat else (1 if w == 1 else 2)

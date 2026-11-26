@@ -94,6 +94,14 @@ func _ready() -> void:
 			tests.new().run(self)
 	if Game.shot != "":
 		load("res://scripts/shots.gd").new().run(self, Game.shot)
+	if Game.play != "":
+		get_tree().create_timer(600.0, true, false, true).timeout.connect(func():
+			print("PLAY timed out"); get_tree().quit(2))
+		var play = load("res://scripts/play.gd")
+		if play == null or not play.can_instantiate():
+			print("PLAY could not load scripts/play.gd"); get_tree().quit(2)
+		else:
+			play.new().run(self, Game.play)
 
 const TRAFFIC_MIX := ["sedan", "sedan", "sedan", "taxi", "taxi", "sports", "hatchback", "suv", "van", "truck"]
 

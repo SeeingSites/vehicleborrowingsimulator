@@ -36,6 +36,7 @@ var touch_handbrake := false
 var force_touch_ui := false
 
 var shot := ""
+var play := ""              # --play=NAME : scripted playthrough (scripts/play.gd)
 var test := false
 var sim_seconds := 0.0      # --sim=N : headless traffic simulation, prints jam metrics
 var traffic_cars := 34
@@ -55,6 +56,8 @@ func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--shot="):
 			shot = a.substr(7)
+		elif a.begins_with("--play="):
+			play = a.substr(7)
 		elif a == "--test":
 			test = true
 		elif a == "--touch":
